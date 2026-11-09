@@ -1,0 +1,432 @@
+{
+  "run": "2026-11-09 19:54 UTC",
+  "summary": {
+    "documents": 10,
+    "checks": 46,
+    "correct": 30,
+    "accuracy": 0.652,
+    "recall": 0.211,
+    "precision": 1.0,
+    "true_pos": 4,
+    "false_neg": 15,
+    "false_pos": 0,
+    "true_neg": 26,
+    "inconclusive": 1,
+    "doc_type_accuracy": 0.6,
+    "ungrounded_quotes": 0,
+    "failed_documents": [
+      "depth_exactly_36_pdf",
+      "all_defects_pdf",
+      "all_defects_docx",
+      "all_defects_xlsx"
+    ]
+  },
+  "results": [
+    {
+      "case": "clean_pdf",
+      "kind": "pdf",
+      "note": "No defects: nothing should be flagged",
+      "seconds": 348.8,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "QA-014",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "only_qa_014_pdf",
+      "kind": "pdf",
+      "note": "Missing OTDR / splice-loss results",
+      "seconds": 435.1,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "QA-014",
+          "expected": "flag",
+          "actual": "flag",
+          "correct": true
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "only_dsn_011_pdf",
+      "kind": "pdf",
+      "note": "Bend radius not stated",
+      "seconds": 436.4,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "DSN-011",
+          "expected": "flag",
+          "actual": "flag",
+          "correct": true
+        },
+        {
+          "rule": "QA-014",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "only_dsn_003_pdf",
+      "kind": "pdf",
+      "note": "144-count vs 96-count; number sits on the line after a heading",
+      "seconds": 365.2,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "DSN-003",
+          "expected": "flag",
+          "actual": "flag",
+          "correct": true
+        },
+        {
+          "rule": "QA-014",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "only_con_007_pdf",
+      "kind": "pdf",
+      "note": "'30 inches deep' wording variant, below the 36 in minimum",
+      "seconds": 308.6,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "CON-007",
+          "expected": "flag",
+          "actual": "flag",
+          "correct": true
+        },
+        {
+          "rule": "QA-014",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "only_prm_002_pdf",
+      "kind": "pdf",
+      "note": "Permit cited without a number (LLM-interpreted rule)",
+      "seconds": 290.5,
+      "status": "awaiting_review",
+      "error": null,
+      "doc_type": "construction_plan",
+      "doc_type_ok": true,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "PRM-002",
+          "expected": "flag",
+          "actual": "error",
+          "correct": false
+        },
+        {
+          "rule": "QA-014",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        },
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "depth_exactly_36_pdf",
+      "kind": "pdf",
+      "note": "Boundary: exactly the minimum is compliant",
+      "seconds": 2.0,
+      "status": "error",
+      "error": "401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'ACCESS_TOKEN_TYPE_UNSUPPORTED', 'metadata': {'method': 'google.ai.generativelanguage.v1.GenerativeService.BatchEmbedContents', 'service': 'generativelanguage.googleapis.com'}}]}}",
+      "doc_type": "unknown",
+      "doc_type_ok": false,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "CON-007",
+          "expected": "ok",
+          "actual": "ok",
+          "correct": true
+        }
+      ]
+    },
+    {
+      "case": "all_defects_pdf",
+      "kind": "pdf",
+      "note": "Every defect planted",
+      "seconds": 2.2,
+      "status": "error",
+      "error": "401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'ACCESS_TOKEN_TYPE_UNSUPPORTED', 'metadata': {'method': 'google.ai.generativelanguage.v1.GenerativeService.BatchEmbedContents', 'service': 'generativelanguage.googleapis.com'}}]}}",
+      "doc_type": "unknown",
+      "doc_type_ok": false,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "QA-014",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "CON-007",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        }
+      ]
+    },
+    {
+      "case": "all_defects_docx",
+      "kind": "docx",
+      "note": "Same defects, DOCX parser path",
+      "seconds": 0.1,
+      "status": "error",
+      "error": "401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'ACCESS_TOKEN_TYPE_UNSUPPORTED', 'metadata': {'method': 'google.ai.generativelanguage.v1.GenerativeService.BatchEmbedContents', 'service': 'generativelanguage.googleapis.com'}}]}}",
+      "doc_type": "unknown",
+      "doc_type_ok": false,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "QA-014",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "CON-007",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        }
+      ]
+    },
+    {
+      "case": "all_defects_xlsx",
+      "kind": "xlsx",
+      "note": "Same defects, XLSX parser path",
+      "seconds": 0.1,
+      "status": "error",
+      "error": "401 UNAUTHENTICATED. {'error': {'code': 401, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'UNAUTHENTICATED', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'ACCESS_TOKEN_TYPE_UNSUPPORTED', 'metadata': {'method': 'google.ai.generativelanguage.v1.GenerativeService.BatchEmbedContents', 'service': 'generativelanguage.googleapis.com'}}]}}",
+      "doc_type": "unknown",
+      "doc_type_ok": false,
+      "ungrounded_quotes": 0,
+      "checks": [
+        {
+          "rule": "QA-014",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-011",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "DSN-003",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "CON-007",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        },
+        {
+          "rule": "PRM-002",
+          "expected": "flag",
+          "actual": "ok",
+          "correct": false
+        }
+      ]
+    }
+  ]
+}

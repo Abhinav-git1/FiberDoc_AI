@@ -1,0 +1,22 @@
+# secrets and local config
+.env
+.env.*
+!.env.example
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+node_modules/
+dist/
+
+# runtime data: uploaded originals
+backend/data/uploads/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
