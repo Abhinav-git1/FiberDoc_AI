@@ -75,6 +75,14 @@ class Rule(Base):
     # required_term | numeric_min | consistency | semantic
     check_type: Mapped[str] = mapped_column(String, default="semantic")
     params: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Catalogue metadata (all demo values; see seed_rules.CATALOGUE). Used to filter retrieval and to cite the source.
+    source_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    section: Mapped[str | None] = mapped_column(String, nullable=True)
+    jurisdiction: Mapped[str | None] = mapped_column(String, nullable=True)
+    standard_family: Mapped[str | None] = mapped_column(String, nullable=True)
+    version: Mapped[str | None] = mapped_column(String, nullable=True)
+    effective_date: Mapped[str | None] = mapped_column(String, nullable=True)  # ISO date
+    status: Mapped[str] = mapped_column(String, default="approved")  # approved | draft | retired; only approved rules are retrieved
     embedding: Mapped[list[float] | None] = mapped_column(Vector(DIM), nullable=True)
 
 

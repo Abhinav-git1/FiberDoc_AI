@@ -93,7 +93,9 @@ def run_case(case: Case, folder: Path) -> dict:
             rank = {"ok": 0, "flag": 1, "error": 2}
             if rank[state] >= rank[actual.get(f.rule_id, "ok")]:
                 actual[f.rule_id] = state
-        checks = [(r, "flag", actual.get(r, "ok")) for r in case.flag] + [(r, "ok", actual.get(r, "ok")) for r in case.ok]
+        # A document that errored produced no findings at all; that is "could not evaluate", not "found nothing".
+        default = "ok" if doc.status == "awaiting_review" else "error"
+        checks = [(r, "flag", actual.get(r, default)) for r in case.flag] + [(r, "ok", actual.get(r, default)) for r in case.ok]
         result = dict(
             case=case.id, kind=case.kind, note=case.note, seconds=round(time.time() - t0, 1),
             status=doc.status, error=doc.error, doc_type=doc.doc_type, doc_type_ok=doc.doc_type == case.doc_type,

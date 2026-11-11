@@ -92,6 +92,8 @@ export default function App() {
           </span>
         </header>
 
+        <div className="banner demo">Demo rule catalogue: non-authoritative. These are invented example requirements, not official telecom or regulatory standards.</div>
+
         {/* Chat stays mounted so uploads/OCR keep running when switching views. */}
         {loadError && <div className="banner err">{loadError}</div>}
         <div className="view" hidden={view !== 'chat'}>

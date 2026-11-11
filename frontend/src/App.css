@@ -132,3 +132,5 @@
 .banner.err { padding: 8px 20px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .download { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); text-decoration: none; font-size: 14px; }
 .download:hover { background: var(--accent-soft); }
+
+.banner.demo { padding: 6px 20px; font-size: 12px; background: color-mix(in srgb, var(--accent, #6c5ce7) 10%, transparent); }

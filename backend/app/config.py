@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
+    gemini_timeout_s: int = 60  # per HTTP request; without it a stalled call leaves a document 'processing' forever
     cors_origins: str = "http://localhost:5173"
     max_upload_mb: int = 25
     upload_dir: str = "data/uploads"  # originals are kept here, under <project_id>/

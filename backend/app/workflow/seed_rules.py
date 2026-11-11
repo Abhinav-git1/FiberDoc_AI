@@ -1,7 +1,28 @@
-"""Demo rule set (mirrors the frontend mock findings). Run: python -m app.workflow.seed_rules"""
+"""Demo rule catalogue. Run: python -m app.workflow.seed_rules
+
+NON-AUTHORITATIVE: these requirements are invented for demonstration. They are not official telecom, utility or
+regulatory standards, and the rule IDs and jurisdiction/standard names below are placeholders, not real references.
+"""
 from sqlalchemy.orm import Session
 
 from app.db.models import Rule
+
+DEMO_NOTICE = "Demo rule catalogue - non-authoritative. Not an official telecom or regulatory standard."
+
+# Metadata shared by every demo rule. Placeholder values on purpose, so nothing resembles a real standard.
+CATALOGUE = dict(
+    source_name="FiberDoc Demo Rule Catalogue (non-authoritative)",
+    jurisdiction="DEMO-REGION-A",
+    standard_family="DEMO-STD-1",
+    version="0.1",
+    effective_date="2026-01-01",
+    status="approved",
+)
+
+SECTIONS = {  # rule id -> section label inside the demo catalogue
+    "QA-014": "Quality assurance", "DSN-003": "Design", "DSN-011": "Design",
+    "CON-007": "Construction", "PRM-002": "Permits", "LBL-001": "Labelling",
+}
 
 RULES = [
     dict(id="QA-014", title="Splice loss test results missing", severity="high",
@@ -33,12 +54,14 @@ RULES = [
 
 
 def seed(db: Session) -> None:
-    for r in RULES:
+    for base in RULES:
+        r = {**CATALOGUE, "section": SECTIONS[base["id"]], **base}
         existing = db.get(Rule, r["id"])
         if existing is None:
             db.add(Rule(**r))
         else:  # keep the demo rule set in sync with this file; embeddings are left untouched
-            for key in ("severity", "applies_to", "keywords", "check_type", "params"):
+            for key in ("severity", "applies_to", "keywords", "check_type", "params",
+                        "source_name", "section", "jurisdiction", "standard_family", "version", "effective_date", "status"):
                 setattr(existing, key, r[key])
     db.commit()
 

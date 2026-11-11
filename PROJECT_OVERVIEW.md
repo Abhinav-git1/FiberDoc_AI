@@ -18,7 +18,7 @@ reviewer** then approves or rejects each finding.
 | **FastAPI** + **Uvicorn** | REST API server (`/api/...`, auto docs at `/docs`) | Fast, typed, async uploads, auto-generated OpenAPI docs | `app/main.py`, `app/api/*.py` | Always (the server process) |
 | **Pydantic** | Validates request/response bodies. Converts `snake_case` to `camelCase` JSON. Also defines the *schemas the LLM must answer in* | Guarantees the API shape matches `frontend/src/types.ts`. Rejects malformed LLM output | `app/schemas.py` | Every request, and every LLM call |
 | **SQLAlchemy 2** | ORM for the database tables | Typed models, works with `psycopg` and `pgvector` | `app/db/models.py`, `app/db/session.py` | Every DB access; tables are created at startup |
-| **PostgreSQL 16 + pgvector** (Docker) | Stores all data **and** vector embeddings (`chunks.embedding`, `rules.embedding`) | One database for relational data and similarity search | `docker-compose.yml` (`db` service, port 5432) | Always; vector search runs during the workflow |
+| **PostgreSQL 18 + pgvector** (local Windows service) | Stores all data **and** vector embeddings (`chunks.embedding`, `rules.embedding`) | One database for relational data and similarity search | Windows service `postgresql-x64-18`, port 5432, database `fiberdoc` (shared server; other projects use their own databases) | Always; vector search runs during the workflow |
 | **PyMuPDF / python-docx / openpyxl** | Extract text, tables and page numbers from PDF / DOCX / XLSX | Reliable text-layer extraction that keeps page numbers, so findings can cite evidence | `app/services/document_parser.py` | Background job after upload |
 | **LangGraph** | Orchestrates the 5-step review workflow as a state graph | Explicit, inspectable pipeline; the last node pauses at the human | `app/workflow/graph.py` | Background job after upload |
 | **Google Gemini** (`google-genai`) | (a) Embeddings for rules and chunks. (b) Structured JSON answers for document classification and semantic rules | Strong, cheap embeddings and structured output. Wrapped in a swappable `LLMProvider` interface | `app/services/llm.py` | Embedding at upload; LLM only when rules need it |
@@ -69,7 +69,7 @@ flowchart LR
     R2 --> SVC
   end
 
-  DB[(PostgreSQL + pgvector<br/>Docker :5432)]
+  DB[(PostgreSQL + pgvector<br/>localhost :5432)]
   GEM[[Google Gemini API<br/>embeddings + structured JSON]]
   LS[[LangSmith<br/>optional tracing]]
 
@@ -226,10 +226,14 @@ sequenceDiagram
 | `GEMINI_API_KEY` | Set in `backend/.env`. Models in use: `gemini-embedding-001` (768-dim) and `gemini-3.8-flash`. Gemini calls retry transient 503/429 errors |
 | Evaluation set | Offline: `backend/tests/test_eval_rules.py` runs the deterministic rules on the defective sample PDF (S4), a compliant one (S5) and an undeterminable case. Live: `backend/tests/test_eval_semantic.py` checks PRM-002 / LBL-001 against S4-S7 using real Gemini calls; skipped unless `RUN_LIVE_EVAL=1`, and skips when Gemini is unavailable. **Live cases have not yet passed**: the free-tier daily quota (20 requests/day on `gemini-3.8-flash`) ran out on 2026-11-09. Generators: `sample_docs/make_sample.py`, `make_variants.py`. 24 offline tests pass |
 | Checksum + original storage | **Built.** `documents.sha256` / `stored_path`, `app/services/storage.py`, `tests/test_storage.py`. New columns are added at startup with `ALTER TABLE … IF NOT EXISTS` (no Alembic yet). Stored files are not yet served back or deleted with their project |
+| Rule catalogue metadata | **Built.** Each rule has `source_name`, `section`, `jurisdiction`, `standard_family`, `version`, `effective_date`, `status` (placeholder values `DEMO-REGION-A` / `DEMO-STD-1` / `0.1`). `retrieve_rules` filters on `status='approved'` and optional jurisdiction / standard family BEFORE ranking. The catalogue is labelled **non-authoritative** in the report, in the UI banner and in `seed_rules.py` |
 | Chat Q&A | Not built (the chat says so) |
 | Undeterminable checks | A deterministic check that cannot find its data (e.g. only one of two numbers) now raises a "Could not verify automatically… Manual review needed" finding (`validate` in `graph.py`) |
 | Auth | Not built (`users` table exists, no login; reviewer is hard-coded as "Reviewer") |
 | Not built yet | PostGIS/GeoJSON, LangSmith eval dataset, Cloud Run deployment, Alembic migrations (tables are created at startup), React/Playwright tests |
+
+### Target design (spec from the project owner; not fully built)
+Sections 5 and 6 of the owner's spec call for: 7 graph nodes (Intake, Extract, Retrieve, Validate, Risk score, Human review with a real pause/resume and persisted checkpoints, Report), a typed state with `extracted_sections`, `retrieved_rules`, `risk_score`, `reviewer_decisions`, `report_version`, `errors`, `workflow_status`; findings shaped as `{rule_id, status, severity, requirement, evidence[], source_pages_checked[], explanation, recommended_action, needs_human_review}`; a 15-30 rule demo knowledge base ingested from a reference document with rule-sized chunks; retrieved rule IDs and excerpts stored with each finding; Recall@K evaluation of rule retrieval. Today's code implements 5 nodes with the graph ending at `human_review`, 6 rules defined in code, and none of the traceability or Recall@K items.
 
 ### Suggested next steps
 1. Run the live semantic evaluation once the Gemini quota allows, and tune the PRM-002 / LBL-001 prompts from the LangSmith traces.
@@ -240,8 +244,13 @@ sequenceDiagram
 ## 7. Run it
 
 ```powershell
+# Database: local Windows PostgreSQL 18 service (postgresql-x64-18, port 5432) with pgvector 0.8.7
+# built from source (MSVC Build Tools). One-time setup as the postgres superuser:
+#   CREATE ROLE fiberdoc LOGIN PASSWORD '...';  CREATE DATABASE fiberdoc OWNER fiberdoc;
+#   \c fiberdoc   CREATE EXTENSION vector;
+# Put the password in backend/.env DATABASE_URL (URL-encode special characters, e.g. $ -> %24).
+
 # Backend (from backend/)
-docker compose up -d db
 .venv\Scripts\activate
 python -m app.workflow.seed_rules      # needs GEMINI_API_KEY
 uvicorn app.main:app --reload          # http://localhost:8000/docs

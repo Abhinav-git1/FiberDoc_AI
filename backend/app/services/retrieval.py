@@ -32,9 +32,17 @@ def _tokens(s: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]{3,}", s.lower()))
 
 
-def retrieve_rules(db: Session, doc_type: str, doc_text: str, doc_embedding: list[float] | None, k: int = 20) -> list[Rule]:
-    """Metadata filter (applies_to) -> vector ranking -> keyword boost. Returns up to k rules."""
-    rules = [r for r in db.scalars(select(Rule)).all() if not r.applies_to or doc_type in r.applies_to]
+def retrieve_rules(db: Session, doc_type: str, doc_text: str, doc_embedding: list[float] | None, k: int = 20,
+                   jurisdiction: str | None = None, standard_family: str | None = None) -> list[Rule]:
+    """Metadata filters (approved status, document type, optional jurisdiction / standard family) -> vector ranking
+    -> keyword boost. Returns up to k rules. Filters run BEFORE ranking, so a retired or out-of-scope rule can
+    never be retrieved however similar it is."""
+    stmt = select(Rule).where(Rule.status == "approved")
+    if jurisdiction:
+        stmt = stmt.where(Rule.jurisdiction == jurisdiction)
+    if standard_family:
+        stmt = stmt.where(Rule.standard_family == standard_family)
+    rules = [r for r in db.scalars(stmt).all() if not r.applies_to or doc_type in r.applies_to]
     if not rules:
         return []
     doc_tokens = _tokens(doc_text)

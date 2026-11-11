@@ -32,3 +32,13 @@ def test_report_escapes_untrusted_text_and_shows_comments():
     assert "<script>x</script>" not in html and "&lt;script&gt;" in html
     assert "<img src=x>" not in html and "&lt;b&gt;ok&lt;/b&gt;" in html
     assert "No supporting text found" in html
+
+
+def test_report_labels_catalogue_as_non_authoritative_and_cites_rule_version():
+    f = NS(document_id="d1", title="T", severity="high", source="rule", rule_id="QA-014",
+           rule=NS(text="Rule text", version="0.1", source_name="FiberDoc Demo Rule Catalogue (non-authoritative)"),
+           evidence_page=2, evidence_quote="q", explanation="why", decision="pending", comments=[])
+    html = render_report(NS(name="P", location=""), [NS(id="d1", name="a.pdf", status="awaiting_review", doc_type="x", page_count=1, error=None)],
+                         [f], datetime(2026, 1, 1))
+    assert "non-authoritative demo catalogue" in html
+    assert "QA-014 (v0.1, FiberDoc Demo Rule Catalogue (non-authoritative))" in html

@@ -24,6 +24,10 @@ def init_db() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS sha256 VARCHAR(64)"))
         conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS stored_path VARCHAR"))
+        for col in ("source_name", "section", "jurisdiction", "standard_family", "version", "effective_date"):
+            conn.execute(text(f"ALTER TABLE rules ADD COLUMN IF NOT EXISTS {col} VARCHAR"))
+        conn.execute(text("ALTER TABLE rules ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'approved'"))
+        conn.execute(text("UPDATE rules SET status = 'approved' WHERE status IS NULL"))
 
 
 def get_db() -> Iterator[Session]:

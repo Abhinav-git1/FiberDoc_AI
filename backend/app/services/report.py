@@ -28,6 +28,12 @@ blockquote{margin:6px 0;padding:6px 12px;background:#f7f7f8;border-left:3px soli
 """
 
 
+def _rule_provenance(rule) -> str:
+    """' (v0.1, FiberDoc Demo Rule Catalogue (non-authoritative))' when the rule carries catalogue metadata."""
+    bits = [b for b in (f"v{rule.version}" if getattr(rule, "version", None) else None, getattr(rule, "source_name", None)) if b]
+    return f" ({e(', '.join(bits))})" if bits else ""
+
+
 def _source_label(source: str) -> str:
     return "AI-assisted (interpreted from document text)" if source == "ai" else "Rule check (deterministic)"
 
@@ -45,9 +51,9 @@ def render_report(project, documents: list, findings: list, generated_at: dateti
         "<h1>Validation report</h1>",
         f"<div class='muted'>{e(project.name)}{' · ' + e(project.location) if project.location else ''}"
         f" · generated {generated_at:%Y-%m-%d %H:%M} UTC</div>",
-        "<div class='note'><strong>Demo report.</strong> Rules are a small, clearly labelled demo set. This report is a "
-        "decision-support summary, not an engineering safety or regulatory certification. AI-assisted findings "
-        "must be confirmed by a human reviewer.</div>",
+        "<div class='note'><strong>Demo report.</strong> The rules used are a small <strong>non-authoritative demo catalogue</strong>, "
+        "not official telecom or regulatory standards. This report is a decision-support summary, not an engineering "
+        "safety or regulatory certification. AI-assisted findings must be confirmed by a human reviewer.</div>",
         "<h2>Summary</h2>",
         f"<p><strong>{len(findings)}</strong> finding(s) across <strong>{len(documents)}</strong> document(s): "
         + ", ".join(f"{by_sev.get(s, 0)} {s}" for s in SEVERITIES) + ".</p>",
@@ -82,7 +88,7 @@ def render_report(project, documents: list, findings: list, generated_at: dateti
             )
             out.append(
                 f"<div class='finding {e(f.severity)}'><span class='sev'>{e(f.severity)}</span> <strong>{e(f.title)}</strong>"
-                f"<div class='muted'>Rule {e(f.rule_id)} · {_source_label(f.source)}</div>"
+                f"<div class='muted'>Rule {e(f.rule_id)}{_rule_provenance(f.rule)} · {_source_label(f.source)}</div>"
                 f"<div><em>{e(f.rule.text)}</em></div>{evidence}<p>{e(f.explanation)}</p>"
                 f"<div><strong>Decision:</strong> {e(DECISION_LABEL.get(f.decision, f.decision))}</div>{comments}</div>"
             )

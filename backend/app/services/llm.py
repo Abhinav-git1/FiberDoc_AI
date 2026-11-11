@@ -17,11 +17,14 @@ class LLMProvider(Protocol):
 class GeminiProvider:
     def __init__(self) -> None:
         from google import genai
+        from google.genai import types
 
         s = get_settings()
         if not s.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
-        self._client = genai.Client(api_key=s.gemini_api_key)
+        # The SDK has no default timeout: a stalled request would block the workflow indefinitely.
+        self._client = genai.Client(api_key=s.gemini_api_key,
+                                    http_options=types.HttpOptions(timeout=s.gemini_timeout_s * 1000))  # ms
         self._model = s.gemini_model
         self._embed_model = s.gemini_embed_model
         self._dim = s.embed_dim
