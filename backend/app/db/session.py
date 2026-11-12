@@ -28,6 +28,9 @@ def init_db() -> None:
             conn.execute(text(f"ALTER TABLE rules ADD COLUMN IF NOT EXISTS {col} VARCHAR"))
         conn.execute(text("ALTER TABLE rules ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'approved'"))
         conn.execute(text("UPDATE rules SET status = 'approved' WHERE status IS NULL"))
+        for col, typ in (("status", "VARCHAR"), ("evidence", "JSON"), ("source_pages_checked", "JSON"),
+                         ("recommended_action", "TEXT"), ("needs_human_review", "BOOLEAN"), ("retrieval", "JSON")):
+            conn.execute(text(f"ALTER TABLE findings ADD COLUMN IF NOT EXISTS {col} {typ}"))
 
 
 def get_db() -> Iterator[Session]:

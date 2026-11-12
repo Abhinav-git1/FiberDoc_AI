@@ -3,7 +3,7 @@
 Every function returns a CheckResult; `passed=None` means "cannot determine".
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -18,6 +18,13 @@ class CheckResult:
     explanation: str
     page: int | None = None
     quote: str | None = None
+    # Further (page, quote) pairs beyond the main one, e.g. the second side of a consistency comparison.
+    extra: list[tuple[int, str]] = field(default_factory=list)
+
+    @property
+    def evidence(self) -> list[dict]:
+        main = [(self.page, self.quote)] if self.quote and self.page is not None else []
+        return [{"page": pg, "quote": q} for pg, q in main + self.extra]
 
 
 def _snippet(text: str, start: int, end: int, pad: int = 60) -> str:
@@ -49,6 +56,22 @@ def check_numeric_min(chunks: list[Chunk], pattern: str, minimum: float, unit: s
     return CheckResult(True, f"{what.capitalize()} of {low:g} {unit} meets the minimum of {minimum:g} {unit}.", c.page, quote)
 
 
+def check_numeric_max(chunks: list[Chunk], pattern: str, maximum: float, unit: str, what: str) -> CheckResult:
+    """Upper limit (e.g. splice loss, spacing): the HIGHEST stated value is checked. Unlike `check_numeric_min`,
+    a missing value is "cannot determine" (passed=None): an absent measurement is not evidence of a breach."""
+    values: list[tuple[float, Chunk, re.Match]] = []
+    for c in chunks:
+        for m in re.finditer(pattern, c.text, re.I):
+            values.append((float(m.group(1)), c, m))
+    if not values:
+        return CheckResult(None, f"No {what} value was found, so the limit of {maximum:g} {unit} could not be checked.")
+    high, c, m = max(values, key=lambda v: v[0])
+    quote = _snippet(c.text, m.start(), m.end())
+    if high > maximum:
+        return CheckResult(False, f"{what.capitalize()} of {high:g} {unit} exceeds the maximum of {maximum:g} {unit}.", c.page, quote)
+    return CheckResult(True, f"{what.capitalize()} of {high:g} {unit} is within the maximum of {maximum:g} {unit}.", c.page, quote)
+
+
 def check_consistency(chunks: list[Chunk], pattern_a: str, pattern_b: str, what: str) -> CheckResult:
     """Two sections must state the same number. Each pattern captures one number."""
 
@@ -68,8 +91,10 @@ def check_consistency(chunks: list[Chunk], pattern_a: str, pattern_b: str, what:
             f"{what.capitalize()} differs: {a[0]:g} (page {a[1].page}) vs {b[0]:g} (page {b[1].page}).",
             a[1].page,
             _snippet(a[1].text, a[2].start(), a[2].end()),
+            [(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))],
         )
-    return CheckResult(True, f"{what.capitalize()} is consistent ({a[0]:g}).", a[1].page, _snippet(a[1].text, a[2].start(), a[2].end()))
+    return CheckResult(True, f"{what.capitalize()} is consistent ({a[0]:g}).", a[1].page, _snippet(a[1].text, a[2].start(), a[2].end()),
+                       [(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))])
 
 
 def run_rule_check(check_type: str, params: dict, chunks: list[Chunk]) -> CheckResult | None:
@@ -78,6 +103,8 @@ def run_rule_check(check_type: str, params: dict, chunks: list[Chunk]) -> CheckR
         return check_required_terms(chunks, params["patterns"], params.get("what", "required evidence"))
     if check_type == "numeric_min":
         return check_numeric_min(chunks, params["pattern"], params["minimum"], params.get("unit", ""), params.get("what", "value"))
+    if check_type == "numeric_max":
+        return check_numeric_max(chunks, params["pattern"], params["maximum"], params.get("unit", ""), params.get("what", "value"))
     if check_type == "consistency":
         return check_consistency(chunks, params["pattern_a"], params["pattern_b"], params.get("what", "value"))
     return None

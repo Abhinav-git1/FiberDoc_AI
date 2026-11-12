@@ -59,6 +59,19 @@ def _process(document_id: str, path: Path) -> None:  # path is the stored origin
             db.commit()
 
 
+INTERRUPTED = "Interrupted: the server restarted while this document was being processed. Please re-upload it."
+
+
+def fail_interrupted(db: Session) -> int:
+    """Run at startup. Processing happens in a background task inside the server process, so a restart kills it
+    and the document would otherwise stay 'processing' forever (and the chat would keep polling)."""
+    stuck = db.scalars(select(Document).where(Document.status == "processing")).all()
+    for doc in stuck:
+        doc.status, doc.error = "error", INTERRUPTED
+    db.commit()
+    return len(stuck)
+
+
 @router.post("/projects/{project_id}/documents", response_model=DocumentOut, response_model_by_alias=True, status_code=202)
 async def upload_document(project_id: str, background: BackgroundTasks, file: UploadFile = File(...), db: Session = Depends(get_db)):
     if db.get(Project, project_id) is None:

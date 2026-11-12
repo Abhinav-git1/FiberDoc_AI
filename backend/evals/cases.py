@@ -1,12 +1,18 @@
 """Evaluation cases: synthetic documents with KNOWN expected outcomes (demo data only).
 
 Each case lists, per rule, whether the app should FLAG it (a real defect was planted) or find it OK.
-Rules not listed in a case are ignored for that case.
+Rules not listed in a case are ignored for that case. tests/test_eval_rules.py checks the deterministic
+expectations offline, so a wrong case is caught without spending Gemini quota.
 Build documents from a clean base and change one thing at a time, so a failure points at one rule.
 """
 from dataclasses import dataclass, field
 
-ALL_RULES = ["QA-014", "DSN-011", "DSN-003", "CON-007", "PRM-002"]
+ALL_RULES = ["QA-014", "DSN-011", "DSN-003", "CON-007", "PRM-002"]  # the original v0.1 rules
+# v0.2 deterministic rules that apply to a construction plan and have a planted defect below
+NEW_RULES = ["DSN-018", "CON-012", "CON-015", "CON-019", "PRM-005", "LBL-004", "SAF-002", "SPL-002"]
+# Checked in every case: rules without a planted defect must stay OK. (DSN-014 has no defect: "single-mode"
+# appears on two pages, so removing it would need two edits.)
+CHECKED = ALL_RULES + NEW_RULES + ["DSN-014"]
 
 CLEAN_PAGES = [
     "METRO RING EAST - SEGMENT 2 (SYNTHETIC DEMO DOCUMENT)\n\nConstruction Plan\n\nScope of work: install underground conduit and fiber "
@@ -17,6 +23,10 @@ CLEAN_PAGES = [
     "Permits\n\nRight-of-way approved under city permit no. ROW-2026-0142 (attached as Appendix B).",
     "Cable schedule\n\nRoute B uses 144-count single-mode cable between handholes HH-01 and HH-14.\n\n"
     "Test results\n\nOTDR traces recorded for all 12 splices; maximum splice loss 0.06 dB.",
+    "Site coordination\n\nA utility locate ticket is requested through one-call before any excavation.\n\n"
+    "Warning tape and tracer wire are placed above the conduit.\n\nTraffic control plan: lane closures per Appendix C.\n\n"
+    "Site safety plan and job hazard analysis are reviewed at the start of each shift.\n\n"
+    "Slack loops of 20 m are stored at each handhole.",
 ]
 
 # (old, new) text substitutions that plant one defect each
@@ -26,6 +36,14 @@ DEFECTS = {
     "DSN-003": ("Route B uses 144-count", "Route B uses 96-count"),
     "CON-007": ("42 in. below grade", "30 inches deep"),
     "PRM-002": ("city permit no. ROW-2026-0142 (attached as Appendix B)", "city permit (copy on file)"),
+    "DSN-018": ("\n\nSlack loops of 20 m are stored at each handhole.", ""),
+    "CON-012": ("Handholes every 300 m.", "Handholes every 450 m."),
+    "CON-015": ("\n\nWarning tape and tracer wire are placed above the conduit.", ""),
+    "CON-019": ("A utility locate ticket is requested through one-call before any excavation.", "Excavation starts after mobilisation."),
+    "PRM-005": ("\n\nTraffic control plan: lane closures per Appendix C.", ""),
+    "LBL-004": ("between handholes HH-01 and HH-14", "between the two end handholes"),
+    "SAF-002": ("\n\nSite safety plan and job hazard analysis are reviewed at the start of each shift.", ""),
+    "SPL-002": ("handhole placement and a splice plan for 12 splice points", "handhole placement and 12 splice points"),
 }
 
 
@@ -54,11 +72,11 @@ class Case:
 
 def _only(rule: str, kind: str = "pdf", **kw) -> Case:
     return Case(f"only_{rule.lower().replace('-', '_')}_{kind}", kind, pages_with(rule),
-                flag=[rule], ok=[r for r in ALL_RULES if r != rule], **kw)
+                flag=[rule], ok=[r for r in CHECKED if r != rule], **kw)
 
 
 CASES: list[Case] = [
-    Case("clean_pdf", "pdf", pages_with(), ok=ALL_RULES, note="No defects: nothing should be flagged"),
+    Case("clean_pdf", "pdf", pages_with(), ok=CHECKED, note="No defects: nothing should be flagged"),
     _only("QA-014", note="Missing OTDR / splice-loss results"),
     _only("DSN-011", note="Bend radius not stated"),
     _only("DSN-003", note="144-count vs 96-count; number sits on the line after a heading"),
@@ -66,7 +84,9 @@ CASES: list[Case] = [
     _only("PRM-002", note="Permit cited without a number (LLM-interpreted rule)"),
     Case("depth_exactly_36_pdf", "pdf", pages_with(replace={"42 in. below grade": "36 in. below grade"}),
          ok=["CON-007"], note="Boundary: exactly the minimum is compliant"),
-    Case("all_defects_pdf", "pdf", pages_with(*ALL_RULES), flag=ALL_RULES, note="Every defect planted"),
-    Case("all_defects_docx", "docx", pages_with(*ALL_RULES), flag=ALL_RULES, note="Same defects, DOCX parser path"),
-    Case("all_defects_xlsx", "xlsx", pages_with(*ALL_RULES), flag=ALL_RULES, note="Same defects, XLSX parser path"),
+    Case("all_defects_pdf", "pdf", pages_with(*ALL_RULES), flag=ALL_RULES, ok=[r for r in CHECKED if r not in ALL_RULES], note="Every defect planted"),
+    Case("all_defects_docx", "docx", pages_with(*ALL_RULES), flag=ALL_RULES, ok=[r for r in CHECKED if r not in ALL_RULES], note="Same defects, DOCX parser path"),
+    Case("new_rule_defects_pdf", "pdf", pages_with(*NEW_RULES), flag=NEW_RULES, ok=[r for r in CHECKED if r not in NEW_RULES],
+         note="Every v0.2 construction-plan defect planted at once (one case, to save Gemini quota)"),
+    Case("all_defects_xlsx", "xlsx", pages_with(*ALL_RULES), flag=ALL_RULES, ok=[r for r in CHECKED if r not in ALL_RULES], note="Same defects, XLSX parser path"),
 ]

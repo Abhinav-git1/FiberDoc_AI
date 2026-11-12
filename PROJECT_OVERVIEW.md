@@ -91,9 +91,9 @@ flowchart LR
 | Document record (status, type, pages, error) | upload endpoint, then workflow | `documents` | `GET /api/projects/{id}/documents` |
 | Text chunks + embedding vectors | parser, then `embed_document_chunks` | `chunks` (`vector(768)`) | retrieval and validation |
 | Rules + embeddings | `seed_rules` (also auto-seeded at server start; embeddings need the Gemini key) | `rules` | retrieval and validation |
-| Findings (always created `pending`) | workflow node `human_review` | `findings` | `GET /api/findings` |
+| Findings (always created `pending`), with `status`, `evidence[]`, `source_pages_checked`, `recommended_action`, `needs_human_review` and a `retrieval` trace (rule as used, rank and scores, evidence chunks shown to the LLM) | workflow node `human_review` | `findings` | `GET /api/findings`, finding card, HTML report |
 | Review decision + comments | `POST /api/findings/{id}/review` | `findings.decision`, `review_comments` | the frontend |
-| Audit trail | every key action | `audit_events` | (not exposed in the UI yet) |
+| Audit trail (`workflow_completed` also holds every retrieved rule with its rank and scores) | every key action | `audit_events` | (not exposed in the UI yet) |
 
 **What leaves your machine:** chunk text and rule text are sent to **Google Gemini** for embeddings. For semantic
 rules and classification, excerpts are also sent to Gemini for structured answers. If LangSmith tracing is on, run
@@ -136,15 +136,16 @@ flowchart LR
 |---|---|---|
 | **classify** | Counts keyword hits per doc type (construction_plan, design_summary, as_built, permit, test_report). With **≥ 2 hits** it picks the best type. Otherwise it asks Gemini for a `DocClassification`. If the LLM fails, the type is `other` | Mostly deterministic; LLM is the fallback |
 | **retrieve_rules** | Filters rules by `applies_to` (doc type). Ranks them by `0.7 × vector similarity` (mean of chunk embeddings vs rule embedding) `+ 0.3 × keyword hit-rate`. Returns up to 20 | Deterministic and vector math |
-| **validate_evidence** | For each rule: if the `check_type` is `required_term`, `numeric_min` or `consistency`, run the Python check. If `semantic`, fetch the top-4 most similar chunks, ask Gemini for an `EvidenceCheck` (quote, page, complies yes/no/unclear, explanation), then **verify the quote appears verbatim** in those chunks. Ungrounded quotes are dropped | Rules: deterministic. Semantic: LLM plus a verification guard |
+| **validate_evidence** | For each rule: if the `check_type` is `required_term`, `numeric_min`, `numeric_max` or `consistency`, run the Python check. If `semantic`, fetch the top-4 most similar chunks, ask Gemini for an `EvidenceCheck` (quote, page, complies yes/no/unclear, explanation), then **verify the quote appears verbatim** in those chunks. Ungrounded quotes are dropped | Rules: deterministic. Semantic: LLM plus a verification guard |
 | **risk_assessment** | Starts from the rule's severity. Passed checks become `low` ("requirement met"). Unverified AI answers are **downgraded one level, never escalated** | Deterministic |
 | **human_review** | Saves every finding to the DB as **`pending`**. Sets the document to `awaiting_review`. Writes an audit event. The graph ends. **Nothing is auto-approved** | Deterministic |
 
-### Rule check types (`validators.py`, rules in `seed_rules.py`)
+### Rule check types (`validators.py`; rules in `backend/reference/demo_rule_catalogue.md`, parsed by `seed_rules.py`)
 | `check_type` | Meaning | Example |
 |---|---|---|
 | `required_term` | A pattern must appear somewhere | QA-014 OTDR results, DSN-011 bend radius |
-| `numeric_min` | Extracted numbers must be ≥ a minimum | CON-007 burial depth ≥ 36 in |
+| `numeric_min` | Extracted numbers must be ≥ a minimum (lowest value is checked) | CON-007 burial depth ≥ 36 in |
+| `numeric_max` | Extracted numbers must be ≤ a maximum (highest value is checked; no value found = "could not verify") | QA-021 splice loss ≤ 0.15 dB, CON-012 handhole spacing ≤ 300 m |
 | `consistency` | Two sections must state the same number | DSN-003 fiber count (summary vs schedule) |
 | `semantic` | Needs interpretation, so the LLM is used with grounding | PRM-002 permit attached, LBL-001 labelling |
 
@@ -226,18 +227,22 @@ sequenceDiagram
 | `GEMINI_API_KEY` | Set in `backend/.env`. Models in use: `gemini-embedding-001` (768-dim) and `gemini-3.8-flash`. Gemini calls retry transient 503/429 errors |
 | Evaluation set | Offline: `backend/tests/test_eval_rules.py` runs the deterministic rules on the defective sample PDF (S4), a compliant one (S5) and an undeterminable case. Live: `backend/tests/test_eval_semantic.py` checks PRM-002 / LBL-001 against S4-S7 using real Gemini calls; skipped unless `RUN_LIVE_EVAL=1`, and skips when Gemini is unavailable. **Live cases have not yet passed**: the free-tier daily quota (20 requests/day on `gemini-3.8-flash`) ran out on 2026-11-09. Generators: `sample_docs/make_sample.py`, `make_variants.py`. 24 offline tests pass |
 | Checksum + original storage | **Built.** `documents.sha256` / `stored_path`, `app/services/storage.py`, `tests/test_storage.py`. New columns are added at startup with `ALTER TABLE … IF NOT EXISTS` (no Alembic yet). Stored files are not yet served back or deleted with their project |
-| Rule catalogue metadata | **Built.** Each rule has `source_name`, `section`, `jurisdiction`, `standard_family`, `version`, `effective_date`, `status` (placeholder values `DEMO-REGION-A` / `DEMO-STD-1` / `0.1`). `retrieve_rules` filters on `status='approved'` and optional jurisdiction / standard family BEFORE ranking. The catalogue is labelled **non-authoritative** in the report, in the UI banner and in `seed_rules.py` |
+| Rule catalogue metadata | **Built.** Each rule has `source_name`, `section`, `jurisdiction`, `standard_family`, `version`, `effective_date`, `status` (placeholder values `DEMO-REGION-A` / `DEMO-STD-1` / `0.2`). `retrieve_rules` filters on `status='approved'` and optional jurisdiction / standard family BEFORE ranking. The catalogue is labelled **non-authoritative** in the report, in the UI banner and in `seed_rules.py` |
+| Demo rule catalogue | **Built.** 20 rules in 8 sections (QA, Design, Construction, Permits, Labelling, Safety, As-built, Splicing) in `backend/reference/demo_rule_catalogue.md`, marked NON-AUTHORITATIVE. `seed_rules.py` parses and validates it (severity, document types, regexes, duplicate IDs) and syncs the database on startup: changed text clears the rule's embedding so it is re-embedded, and rules removed from the file are marked `retired`, not deleted. 18 rules are deterministic and only 2 use Gemini. Every rule has a passing and a failing example, which `tests/test_catalogue.py` runs |
+| Finding traceability | **Built.** Each finding stores a check status (compliant / non_compliant / unverified), all evidence quotes (both sides of a consistency check), pages checked, a deterministic recommended action, a needs-human-review flag, and a retrieval trace. The audit event lists every retrieved rule with scores (input for the future Recall@K eval). Findings created before 2026-11-12 have `null` for these fields |
+| Classification | **Known issue.** Keyword hits are counted over the whole text with equal weight, so a construction plan with "Design summary" section headings is classified as `design_summary`, and construction-only rules are skipped |
 | Chat Q&A | Not built (the chat says so) |
 | Undeterminable checks | A deterministic check that cannot find its data (e.g. only one of two numbers) now raises a "Could not verify automatically… Manual review needed" finding (`validate` in `graph.py`) |
 | Auth | Not built (`users` table exists, no login; reviewer is hard-coded as "Reviewer") |
 | Not built yet | PostGIS/GeoJSON, LangSmith eval dataset, Cloud Run deployment, Alembic migrations (tables are created at startup), React/Playwright tests |
 
 ### Target design (spec from the project owner; not fully built)
-Sections 5 and 6 of the owner's spec call for: 7 graph nodes (Intake, Extract, Retrieve, Validate, Risk score, Human review with a real pause/resume and persisted checkpoints, Report), a typed state with `extracted_sections`, `retrieved_rules`, `risk_score`, `reviewer_decisions`, `report_version`, `errors`, `workflow_status`; findings shaped as `{rule_id, status, severity, requirement, evidence[], source_pages_checked[], explanation, recommended_action, needs_human_review}`; a 15-30 rule demo knowledge base ingested from a reference document with rule-sized chunks; retrieved rule IDs and excerpts stored with each finding; Recall@K evaluation of rule retrieval. Today's code implements 5 nodes with the graph ending at `human_review`, 6 rules defined in code, and none of the traceability or Recall@K items.
+Sections 5 and 6 of the owner's spec call for: 7 graph nodes (Intake, Extract, Retrieve, Validate, Risk score, Human review with a real pause/resume and persisted checkpoints, Report), a typed state with `extracted_sections`, `retrieved_rules`, `risk_score`, `reviewer_decisions`, `report_version`, `errors`, `workflow_status`; findings shaped as `{rule_id, status, severity, requirement, evidence[], source_pages_checked[], explanation, recommended_action, needs_human_review}`; a 15-30 rule demo knowledge base ingested from a reference document with rule-sized chunks; retrieved rule IDs and excerpts stored with each finding; Recall@K evaluation of rule retrieval. Today's code implements 5 nodes with the graph ending at `human_review`, the 20-rule catalogue ingested from a reference document, and the spec's finding fields and retrieval traceability. Recall@K, pause/resume with checkpoints and the Report node are not built yet.
 
 ### Suggested next steps
-1. Run the live semantic evaluation once the Gemini quota allows, and tune the PRM-002 / LBL-001 prompts from the LangSmith traces.
-2. Add auth, so reviewer names in the audit trail are real; then consider deployment.
+1. Fix document classification (weight the title above section headings), then Recall@K for rule retrieval.
+2. Run the live semantic evaluation once the Gemini quota allows, and tune the PRM-002 / LBL-001 prompts from the LangSmith traces.
+3. Add auth, so reviewer names in the audit trail are real; then consider deployment.
 
 ---
 

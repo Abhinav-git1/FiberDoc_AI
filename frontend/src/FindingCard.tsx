@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import type { Decision, Finding } from './types'
+import type { Decision, Finding, FindingStatus } from './types'
+
+const STATUS_LABEL: Record<FindingStatus, string> = {
+  compliant: 'Compliant',
+  non_compliant: 'Non-compliant',
+  unverified: 'Could not verify',
+}
 
 export const DECISION_LABEL: Record<Decision, string> = {
   pending: 'Pending review',
@@ -30,6 +36,7 @@ export default function FindingCard({ finding: f, onReview, defaultOpen = false 
       <button className="finding-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className={`badge sev ${f.severity}`}>{f.severity}</span>
         <span className="finding-title">{f.title}</span>
+        {f.status && <span className={`badge status ${f.status}`}>{STATUS_LABEL[f.status]}</span>}
         <span className={`badge dec ${f.decision}`}>{DECISION_LABEL[f.decision]}</span>
         <span className="chev">{open ? '▾' : '▸'}</span>
       </button>
@@ -43,10 +50,15 @@ export default function FindingCard({ finding: f, onReview, defaultOpen = false 
           </section>
           <section>
             <h4>Evidence</h4>
-            {f.evidence ? (
-              <blockquote>“{f.evidence.quote}” <span className="muted">— page {f.evidence.page}</span></blockquote>
+            {f.evidenceList.length > 0 ? (
+              f.evidenceList.map((ev, i) => (
+                <blockquote key={i}>“{ev.quote}” <span className="muted">— page {ev.page}</span></blockquote>
+              ))
             ) : (
               <p className="missing">Required evidence not found in the document.</p>
+            )}
+            {f.sourcePagesChecked && f.sourcePagesChecked.length > 0 && (
+              <p className="muted">Pages checked: {f.sourcePagesChecked.join(', ')}</p>
             )}
           </section>
           <section>
@@ -56,6 +68,40 @@ export default function FindingCard({ finding: f, onReview, defaultOpen = false 
             </h4>
             <p>{f.explanation}</p>
           </section>
+          {f.recommendedAction && (
+            <section>
+              <h4>Recommended action</h4>
+              <p>{f.recommendedAction}</p>
+            </section>
+          )}
+          {f.retrieval && (
+            <details className="trace">
+              <summary>Why this rule was checked</summary>
+              <p className="muted">
+                Rule {f.retrieval.rule.id}
+                {f.retrieval.rule.version && ` v${f.retrieval.rule.version}`}
+                {f.retrieval.rule.section && ` · ${f.retrieval.rule.section}`} · {f.retrieval.rule.check_type.replace('_', ' ')} check
+                · document type {f.retrieval.doc_type.replace('_', ' ')}
+              </p>
+              {f.retrieval.ranking && (
+                <p className="muted">
+                  Ranked #{f.retrieval.ranking.rank} (score {f.retrieval.ranking.score.toFixed(2)} = 0.7 × similarity{' '}
+                  {f.retrieval.ranking.vector.toFixed(2)} + 0.3 × keywords {f.retrieval.ranking.keyword.toFixed(2)})
+                </p>
+              )}
+              {f.retrieval.evidence_chunks && f.retrieval.evidence_chunks.length > 0 && (
+                <>
+                  <p className="muted">Excerpts given to the AI ({f.retrieval.evidence_method} search):</p>
+                  {f.retrieval.evidence_chunks.map((c) => (
+                    <blockquote key={c.chunk_id} className="excerpt">
+                      {c.excerpt}
+                      <span className="muted"> — page {c.page}{c.similarity !== null && `, similarity ${c.similarity.toFixed(2)}`}</span>
+                    </blockquote>
+                  ))}
+                </>
+              )}
+            </details>
+          )}
 
           {f.comments.length > 0 && (
             <section>

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import get_settings
@@ -72,7 +72,7 @@ class Rule(Base):
     severity: Mapped[str] = mapped_column(String, default="medium")
     applies_to: Mapped[list] = mapped_column(JSON, default=list)  # doc types; [] = all
     keywords: Mapped[list] = mapped_column(JSON, default=list)
-    # required_term | numeric_min | consistency | semantic
+    # required_term | numeric_min | numeric_max | consistency | semantic
     check_type: Mapped[str] = mapped_column(String, default="semantic")
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     # Catalogue metadata (all demo values; see seed_rules.CATALOGUE). Used to filter retrieval and to cite the source.
@@ -98,6 +98,16 @@ class Finding(Base):
     evidence_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
     explanation: Mapped[str] = mapped_column(Text)
+    # Outcome of the automatic check, separate from the human `decision`: compliant | non_compliant | unverified.
+    # Nullable because findings created before these columns existed don't have them.
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{page, quote}]; evidence_page/quote = first item
+    source_pages_checked: Mapped[list | None] = mapped_column(JSON, nullable=True)  # pages the check looked at
+    recommended_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    needs_human_review: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # automation could not settle it
+    # Retrieval trace: the rule as used (id, version, source, text), its ranking scores, and for semantic rules
+    # the document chunks given to the LLM. See graph.validate.
+    retrieval: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     decision: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     document: Mapped[Document] = relationship()

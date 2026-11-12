@@ -17,7 +17,7 @@ from app.db.models import Chunk, Document, Finding, Rule
 from app.schemas import DocClassification
 from app.services import audit
 from app.services.llm import get_llm
-from app.services.retrieval import retrieve_rules, top_chunks_for_rule
+from app.services.retrieval import evidence_chunks_for_rule, rank_rules
 from app.services.semantic import evaluate_semantic_rule
 from app.services.validators import Chunk as VChunk
 from app.services.validators import run_rule_check
@@ -30,14 +30,39 @@ DOC_TYPE_HINTS = {
     "test_report": ["otdr", "test report", "insertion loss"],
 }
 SEVERITY_ORDER = ["low", "medium", "high"]
+EXCERPT_CHARS = 300  # how much of each evidence chunk the retrieval trace keeps
 
 
 class State(TypedDict, total=False):
     document_id: str
     doc_type: str
     rule_ids: list[str]
-    raw_findings: list[dict]  # {rule_id, source, passed, explanation, page, quote}
+    rule_scores: dict[str, dict]  # rule id -> {rank, score, vector, keyword}
+    # {rule_id, source, passed, explanation, page, quote, evidence, pages_checked, evidence_chunks, evidence_method}
+    raw_findings: list[dict]
     findings: list[dict]  # after risk assessment
+
+
+def outcome(passed: bool | None, rule_id: str, title: str) -> tuple[str, str, bool]:
+    """(status, recommended_action, needs_human_review) for a check result. Deterministic: no LLM wording.
+    needs_human_review means the automation could not settle the rule by itself. Every finding still waits for a
+    human decision either way."""
+    if passed is True:
+        return "compliant", "No action needed.", False
+    if passed is False:
+        return ("non_compliant",
+                f"Revise the document so it meets {rule_id} ({title}), or record an approved exception.", True)
+    return "unverified", f"Check the document against {rule_id} ({title}) by hand; the automatic check could not decide.", True
+
+
+def rule_trace(rule: Rule, doc_type: str, scores: dict | None) -> dict:
+    """What a reviewer needs to see why this rule was applied: the rule exactly as used, and how it ranked."""
+    return {
+        "rule": {"id": rule.id, "version": rule.version, "source_name": rule.source_name, "section": rule.section,
+                 "check_type": rule.check_type, "text": rule.text},
+        "doc_type": doc_type,
+        "ranking": scores,
+    }
 
 
 def build_graph(db: Session):
@@ -69,35 +94,40 @@ def build_graph(db: Session):
         # Document-level embedding = mean of chunk embeddings (if present).
         embs = [c.embedding for c in chunks if c.embedding is not None]
         doc_emb = [sum(col) / len(embs) for col in zip(*embs)] if embs else None
-        rules = retrieve_rules(db, state["doc_type"], text, doc_emb)
-        return {"rule_ids": [r.id for r in rules]}
+        ranked = rank_rules(db, state["doc_type"], text, doc_emb)
+        return {"rule_ids": [s.rule.id for s in ranked], "rule_scores": {s.rule.id: s.trace() for s in ranked}}
 
     def validate(state: State) -> State:
         doc_id = state["document_id"]
         vchunks = [VChunk(c.page, c.text) for c in _chunks(doc_id)]
+        all_pages = sorted({c.page for c in vchunks})
         out: list[dict] = []
         for rid in state["rule_ids"]:
             rule = db.get(Rule, rid)
             res = run_rule_check(rule.check_type, rule.params or {}, vchunks)
-            if res is not None:  # deterministic
-                if res.passed is not False:
-                    if res.passed:
-                        out.append(dict(rule_id=rid, source="rule", passed=True, explanation=res.explanation, page=res.page, quote=res.quote))
-                    else:  # undeterminable: surface it for a human instead of staying silent
-                        out.append(dict(rule_id=rid, source="rule", passed=None, page=res.page, quote=res.quote,
-                                        explanation=f"Could not verify automatically: {res.explanation} Manual review needed."))
-                    continue
-                out.append(dict(rule_id=rid, source="rule", passed=False, explanation=res.explanation, page=res.page, quote=res.quote))
+            if res is not None:  # deterministic: the check scans every page
+                explanation = res.explanation
+                if res.passed is None:  # undeterminable: surface it for a human instead of staying silent
+                    explanation = f"Could not verify automatically: {res.explanation} Manual review needed."
+                out.append(dict(rule_id=rid, source="rule", passed=res.passed, explanation=explanation,
+                                page=res.page, quote=res.quote, evidence=res.evidence, pages_checked=all_pages))
                 continue
             # semantic rule -> LLM over retrieved evidence, then grounding check
-            ev_chunks = top_chunks_for_rule(db, doc_id, rule)
-            if not ev_chunks:
-                out.append(dict(rule_id=rid, source="rule", passed=False, page=None, quote=None,
+            scored, method = evidence_chunks_for_rule(db, doc_id, rule)
+            trace = dict(evidence_method=method, evidence_chunks=[
+                {"chunk_id": c.id, "page": c.page, "similarity": None if sim is None else round(sim, 4),
+                 "excerpt": c.text[:EXCERPT_CHARS]} for c, sim in scored])
+            if not scored:
+                out.append(dict(rule_id=rid, source="rule", passed=False, page=None, quote=None, evidence=[],
+                                pages_checked=all_pages, **trace,
                                 explanation="No text relevant to this requirement was found in the document."))
                 continue
+            ev_chunks = [c for c, _ in scored]
             result = evaluate_semantic_rule(rid, rule.text, [VChunk(c.page, c.text) for c in ev_chunks])
             if result is not None:
-                out.append(dict(rule_id=rid, **result))
+                ev = [{"page": result["page"], "quote": result["quote"]}] if result["quote"] and result["page"] is not None else []
+                out.append(dict(rule_id=rid, **result, evidence=ev,
+                                pages_checked=sorted({c.page for c in ev_chunks}), **trace))
         return {"raw_findings": out}
 
     def assess_risk(state: State) -> State:
@@ -110,7 +140,12 @@ def build_graph(db: Session):
             elif f["source"] == "ai" and f["quote"] is None and f["passed"] is None:
                 sev = SEVERITY_ORDER[max(0, SEVERITY_ORDER.index(sev) - 1)]  # unverified AI: never escalate
             title = rule.title if f["passed"] is not True else f"{rule.title} – requirement met"
-            findings.append({**f, "severity": sev, "title": title})
+            status, action, needs_review = outcome(f["passed"], rule.id, rule.title)
+            trace = rule_trace(rule, state["doc_type"], state.get("rule_scores", {}).get(rule.id))
+            if "evidence_method" in f:
+                trace.update(evidence_method=f["evidence_method"], evidence_chunks=f["evidence_chunks"])
+            findings.append({**f, "severity": sev, "title": title, "status": status, "recommended_action": action,
+                             "needs_human_review": needs_review, "retrieval": trace})
         return {"findings": findings}
 
     def human_review(state: State) -> State:
@@ -119,11 +154,16 @@ def build_graph(db: Session):
             db.add(Finding(
                 project_id=doc.project_id, document_id=doc.id, rule_id=f["rule_id"], title=f["title"],
                 severity=f["severity"], source=f["source"], evidence_page=f["page"], evidence_quote=f["quote"],
-                explanation=f["explanation"], decision="pending",
+                explanation=f["explanation"], status=f["status"], evidence=f["evidence"],
+                source_pages_checked=f["pages_checked"], recommended_action=f["recommended_action"],
+                needs_human_review=f["needs_human_review"], retrieval=f["retrieval"], decision="pending",
             ))
         doc.status = "awaiting_review"  # pause: only a human can move findings out of 'pending'
         db.commit()
-        audit.record(db, "system", "workflow_completed", "document", doc.id, findings=len(state["findings"]))
+        # The full ranked rule list, including rules that produced no finding (needed for Recall@K).
+        audit.record(db, "system", "workflow_completed", "document", doc.id, findings=len(state["findings"]),
+                     doc_type=state["doc_type"], retrieved_rules=[{"rule_id": rid, **state.get("rule_scores", {}).get(rid, {})}
+                                                                  for rid in state["rule_ids"]])
         return {}
 
     g = StateGraph(State)

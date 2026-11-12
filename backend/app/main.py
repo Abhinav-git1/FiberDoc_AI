@@ -10,11 +10,13 @@ from app.db.session import SessionLocal, init_db
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.api.projects import fail_interrupted
     from app.workflow.seed_rules import seed
 
     init_db()
     with SessionLocal() as db:
         seed(db)
+        fail_interrupted(db)
     yield
 
 

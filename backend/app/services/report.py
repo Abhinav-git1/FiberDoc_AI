@@ -34,13 +34,41 @@ def _rule_provenance(rule) -> str:
     return f" ({e(', '.join(bits))})" if bits else ""
 
 
+STATUS_LABEL = {"compliant": "Compliant", "non_compliant": "Non-compliant", "unverified": "Could not verify"}
+
+
+def _evidence_items(f) -> list[tuple[int | None, str]]:
+    ev = getattr(f, "evidence", None)
+    if ev is not None:
+        return [(x["page"], x["quote"]) for x in ev]
+    return [(f.evidence_page, f.evidence_quote)] if f.evidence_quote else []
+
+
+def _check_details(f) -> str:
+    """Status, pages checked, retrieval rank and recommended action; empty for findings that predate them."""
+    bits = []
+    if getattr(f, "status", None):
+        bits.append(f"<strong>Check result:</strong> {e(STATUS_LABEL.get(f.status, f.status))}")
+    pages = getattr(f, "source_pages_checked", None)
+    if pages:
+        bits.append(f"Pages checked: {e(', '.join(str(p) for p in pages))}")
+    ranking = (getattr(f, "retrieval", None) or {}).get("ranking")
+    if ranking:
+        bits.append(f"Retrieved as rule #{ranking['rank']} (score {ranking['score']:.2f})")
+    out = f"<div class='muted'>{' · '.join(bits)}</div>" if bits else ""
+    if getattr(f, "recommended_action", None):
+        out += f"<div><strong>Recommended action:</strong> {e(f.recommended_action)}</div>"
+    return out
+
+
 def _source_label(source: str) -> str:
     return "AI-assisted (interpreted from document text)" if source == "ai" else "Rule check (deterministic)"
 
 
 def render_report(project, documents: list, findings: list, generated_at: datetime) -> str:
     """`findings` items need: document_id, title, severity, source, rule_id, rule (with .text), evidence_page,
-    evidence_quote, explanation, decision, comments (author, text, created_at)."""
+    evidence_quote, explanation, decision, comments (author, text, created_at). Optional (absent on old findings):
+    evidence [{page, quote}], status, source_pages_checked, recommended_action, retrieval."""
     by_sev = Counter(f.severity for f in findings)
     by_decision = Counter(f.decision for f in findings)
     pending = by_decision.get("pending", 0)
@@ -78,8 +106,9 @@ def render_report(project, documents: list, findings: list, generated_at: dateti
             continue
         out.append(f"<h3>{e(d.name)}</h3>")
         for f in sorted(mine, key=lambda x: SEVERITIES.index(x.severity) if x.severity in SEVERITIES else 9):
-            if f.evidence_quote:
-                evidence = f"<blockquote>{e(f.evidence_quote)}</blockquote><div class='muted'>Page {f.evidence_page}</div>"
+            items = _evidence_items(f)
+            if items:
+                evidence = "".join(f"<blockquote>{e(q)}</blockquote><div class='muted'>Page {pg}</div>" for pg, q in items)
             else:
                 evidence = "<div class='muted'>No supporting text found in the document for this finding.</div>"
             comments = "".join(
@@ -89,7 +118,7 @@ def render_report(project, documents: list, findings: list, generated_at: dateti
             out.append(
                 f"<div class='finding {e(f.severity)}'><span class='sev'>{e(f.severity)}</span> <strong>{e(f.title)}</strong>"
                 f"<div class='muted'>Rule {e(f.rule_id)}{_rule_provenance(f.rule)} · {_source_label(f.source)}</div>"
-                f"<div><em>{e(f.rule.text)}</em></div>{evidence}<p>{e(f.explanation)}</p>"
+                f"<div><em>{e(f.rule.text)}</em></div>{evidence}<p>{e(f.explanation)}</p>{_check_details(f)}"
                 f"<div><strong>Decision:</strong> {e(DECISION_LABEL.get(f.decision, f.decision))}</div>{comments}</div>"
             )
     out.append("</body></html>")

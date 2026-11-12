@@ -11,11 +11,17 @@ router = APIRouter(prefix="/api")
 
 
 def to_out(f: Finding) -> FindingOut:
+    if f.evidence is not None:
+        ev = [EvidenceOut(page=e["page"], quote=e["quote"]) for e in f.evidence]
+    else:  # finding from before the evidence list existed
+        ev = [EvidenceOut(page=f.evidence_page, quote=f.evidence_quote)] if f.evidence_quote and f.evidence_page else []
     return FindingOut(
         id=f.id, project_id=f.project_id, doc_name=f.document.name, title=f.title, severity=f.severity,
         source=f.source, rule_id=f.rule_id, rule_text=f.rule.text,
-        evidence=EvidenceOut(page=f.evidence_page, quote=f.evidence_quote) if f.evidence_quote and f.evidence_page else None,
-        explanation=f.explanation, decision=f.decision,
+        evidence=ev[0] if ev else None, evidence_list=ev,
+        explanation=f.explanation, status=f.status, source_pages_checked=f.source_pages_checked,
+        recommended_action=f.recommended_action, needs_human_review=f.needs_human_review, retrieval=f.retrieval,
+        decision=f.decision,
         comments=[CommentOut(id=c.id, author=c.author, text=c.text, at=c.created_at.date().isoformat()) for c in f.comments],
     )
 

@@ -134,3 +134,10 @@
 .download:hover { background: var(--accent-soft); }
 
 .banner.demo { padding: 6px 20px; font-size: 12px; background: color-mix(in srgb, var(--accent, #6c5ce7) 10%, transparent); }
+.badge.status { background: var(--bg-hover); color: var(--muted); }
+.badge.status.non_compliant { color: var(--danger); }
+.badge.status.compliant { color: var(--ok); }
+.finding-body .trace { margin-top: 4px; }
+.finding-body .trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.finding-body .trace p { margin: 6px 0; font-size: 13px; }
+.finding-body blockquote.excerpt { font-size: 12px; margin-bottom: 6px; white-space: pre-wrap; }
