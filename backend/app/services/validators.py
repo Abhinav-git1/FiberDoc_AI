@@ -1,6 +1,7 @@
 """Deterministic checks. No LLM here: required fields, numeric limits, cross-section consistency.
 
-Every function returns a CheckResult; `passed=None` means "cannot determine".
+Every function returns a CheckResult; `passed=None` means "cannot determine", and `missing=True` means the check
+found nothing in the document to judge (see graph.outcome for how these map to the blueprint's four statuses).
 """
 import re
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ class CheckResult:
     explanation: str
     page: int | None = None
     quote: str | None = None
+    missing: bool = False  # nothing to judge was found (no term, no value, only one side of a comparison)
     # Further (page, quote) pairs beyond the main one, e.g. the second side of a consistency comparison.
     extra: list[tuple[int, str]] = field(default_factory=list)
 
@@ -38,7 +40,8 @@ def check_required_terms(chunks: list[Chunk], patterns: list[str], what: str) ->
             m = re.search(p, c.text, re.I)
             if m:
                 return CheckResult(True, f"{what} found.", c.page, _snippet(c.text, m.start(), m.end()))
-    return CheckResult(False, f"No {what} was found in the document. Detected by a required-evidence check, not inferred.")
+    return CheckResult(False, f"No {what} was found in the document. Detected by a required-evidence check, not inferred.",
+                       missing=True)
 
 
 def check_numeric_min(chunks: list[Chunk], pattern: str, minimum: float, unit: str, what: str) -> CheckResult:
@@ -48,7 +51,7 @@ def check_numeric_min(chunks: list[Chunk], pattern: str, minimum: float, unit: s
         for m in re.finditer(pattern, c.text, re.I):
             values.append((float(m.group(1)), c, m))
     if not values:
-        return CheckResult(False, f"No {what} value was found, so compliance cannot be confirmed.")
+        return CheckResult(False, f"No {what} value was found, so compliance cannot be confirmed.", missing=True)
     low, c, m = min(values, key=lambda v: v[0])
     quote = _snippet(c.text, m.start(), m.end())
     if low < minimum:
@@ -64,7 +67,8 @@ def check_numeric_max(chunks: list[Chunk], pattern: str, maximum: float, unit: s
         for m in re.finditer(pattern, c.text, re.I):
             values.append((float(m.group(1)), c, m))
     if not values:
-        return CheckResult(None, f"No {what} value was found, so the limit of {maximum:g} {unit} could not be checked.")
+        return CheckResult(None, f"No {what} value was found, so the limit of {maximum:g} {unit} could not be checked.",
+                           missing=True)
     high, c, m = max(values, key=lambda v: v[0])
     quote = _snippet(c.text, m.start(), m.end())
     if high > maximum:
@@ -84,17 +88,17 @@ def check_consistency(chunks: list[Chunk], pattern_a: str, pattern_b: str, what:
 
     a, b = first(pattern_a), first(pattern_b)
     if not a or not b:
-        return CheckResult(None, f"Could not locate both {what} values to compare.")
+        return CheckResult(None, f"Could not locate both {what} values to compare.", missing=True)
     if a[0] != b[0]:
         return CheckResult(
             False,
             f"{what.capitalize()} differs: {a[0]:g} (page {a[1].page}) vs {b[0]:g} (page {b[1].page}).",
             a[1].page,
             _snippet(a[1].text, a[2].start(), a[2].end()),
-            [(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))],
+            extra=[(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))],
         )
     return CheckResult(True, f"{what.capitalize()} is consistent ({a[0]:g}).", a[1].page, _snippet(a[1].text, a[2].start(), a[2].end()),
-                       [(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))])
+                       extra=[(b[1].page, _snippet(b[1].text, b[2].start(), b[2].end()))])
 
 
 def run_rule_check(check_type: str, params: dict, chunks: list[Chunk]) -> CheckResult | None:

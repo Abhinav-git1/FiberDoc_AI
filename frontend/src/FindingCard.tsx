@@ -2,9 +2,10 @@ import { useState } from 'react'
 import type { Decision, Finding, FindingStatus } from './types'
 
 const STATUS_LABEL: Record<FindingStatus, string> = {
-  compliant: 'Compliant',
-  non_compliant: 'Non-compliant',
-  unverified: 'Could not verify',
+  passed: 'Passed',
+  failed: 'Failed',
+  missing_evidence: 'Missing evidence',
+  needs_review: 'Needs review',
 }
 
 export const DECISION_LABEL: Record<Decision, string> = {

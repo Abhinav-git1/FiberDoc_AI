@@ -38,21 +38,29 @@ class State(TypedDict, total=False):
     doc_type: str
     rule_ids: list[str]
     rule_scores: dict[str, dict]  # rule id -> {rank, score, vector, keyword}
-    # {rule_id, source, passed, explanation, page, quote, evidence, pages_checked, evidence_chunks, evidence_method}
+    # {rule_id, source, passed, missing, explanation, page, quote, evidence, pages_checked, evidence_chunks, evidence_method}
     raw_findings: list[dict]
     findings: list[dict]  # after risk assessment
 
 
-def outcome(passed: bool | None, rule_id: str, title: str) -> tuple[str, str, bool]:
-    """(status, recommended_action, needs_human_review) for a check result. Deterministic: no LLM wording.
-    needs_human_review means the automation could not settle the rule by itself. Every finding still waits for a
-    human decision either way."""
+def outcome(passed: bool | None, missing: bool, rule_id: str, title: str) -> tuple[str, str, bool]:
+    """(status, recommended_action, needs_human_review) for a check result, using the blueprint's four statuses:
+
+      passed            the requirement is met, with evidence
+      failed            evidence was found and it breaks the requirement (e.g. 30 in. depth vs a 36 in. minimum)
+      missing_evidence  the check looked and found nothing to judge (no OTDR results, no depth stated)
+      needs_review      something was found but the automation could not decide (unclear, unverified AI answer)
+
+    Deterministic: no LLM wording. needs_human_review means the automation could not settle the rule by itself.
+    Every finding still waits for a human decision either way."""
     if passed is True:
-        return "compliant", "No action needed.", False
+        return "passed", "No action needed.", False
+    if missing:
+        return ("missing_evidence",
+                f"Add the evidence for {rule_id} ({title}) to the document, or mark the rule not applicable.", True)
     if passed is False:
-        return ("non_compliant",
-                f"Revise the document so it meets {rule_id} ({title}), or record an approved exception.", True)
-    return "unverified", f"Check the document against {rule_id} ({title}) by hand; the automatic check could not decide.", True
+        return "failed", f"Revise the document so it meets {rule_id} ({title}), or record an approved exception.", True
+    return "needs_review", f"Check the document against {rule_id} ({title}) by hand; the automatic check could not decide.", True
 
 
 def rule_trace(rule: Rule, doc_type: str, scores: dict | None) -> dict:
@@ -109,7 +117,7 @@ def build_graph(db: Session):
                 explanation = res.explanation
                 if res.passed is None:  # undeterminable: surface it for a human instead of staying silent
                     explanation = f"Could not verify automatically: {res.explanation} Manual review needed."
-                out.append(dict(rule_id=rid, source="rule", passed=res.passed, explanation=explanation,
+                out.append(dict(rule_id=rid, source="rule", passed=res.passed, missing=res.missing, explanation=explanation,
                                 page=res.page, quote=res.quote, evidence=res.evidence, pages_checked=all_pages))
                 continue
             # semantic rule -> LLM over retrieved evidence, then grounding check
@@ -118,7 +126,7 @@ def build_graph(db: Session):
                 {"chunk_id": c.id, "page": c.page, "similarity": None if sim is None else round(sim, 4),
                  "excerpt": c.text[:EXCERPT_CHARS]} for c, sim in scored])
             if not scored:
-                out.append(dict(rule_id=rid, source="rule", passed=False, page=None, quote=None, evidence=[],
+                out.append(dict(rule_id=rid, source="rule", passed=False, missing=True, page=None, quote=None, evidence=[],
                                 pages_checked=all_pages, **trace,
                                 explanation="No text relevant to this requirement was found in the document."))
                 continue
@@ -140,7 +148,7 @@ def build_graph(db: Session):
             elif f["source"] == "ai" and f["quote"] is None and f["passed"] is None:
                 sev = SEVERITY_ORDER[max(0, SEVERITY_ORDER.index(sev) - 1)]  # unverified AI: never escalate
             title = rule.title if f["passed"] is not True else f"{rule.title} – requirement met"
-            status, action, needs_review = outcome(f["passed"], rule.id, rule.title)
+            status, action, needs_review = outcome(f["passed"], f.get("missing", False), rule.id, rule.title)
             trace = rule_trace(rule, state["doc_type"], state.get("rule_scores", {}).get(rule.id))
             if "evidence_method" in f:
                 trace.update(evidence_method=f["evidence_method"], evidence_chunks=f["evidence_chunks"])

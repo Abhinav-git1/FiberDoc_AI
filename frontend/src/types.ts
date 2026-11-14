@@ -3,7 +3,7 @@ export type Decision = 'pending' | 'approved' | 'rejected' | 'changes_requested'
 /** 'rule' = deterministic Python check; 'ai' = LLM interpretation of unstructured evidence. */
 export type FindingSource = 'rule' | 'ai'
 /** Result of the automatic check, separate from the human decision. */
-export type FindingStatus = 'compliant' | 'non_compliant' | 'unverified'
+export type FindingStatus = 'passed' | 'failed' | 'missing_evidence' | 'needs_review'
 
 export interface Evidence {
   page: number
@@ -29,6 +29,7 @@ export interface Comment {
 export interface Finding {
   id: string
   projectId: string
+  documentId: string
   docName: string
   title: string
   severity: Severity
@@ -66,6 +67,19 @@ export interface BackendDoc {
   status: 'uploaded' | 'processing' | 'awaiting_review' | 'error'
   pageCount: number
   error: string | null
+  sha256?: string | null
+}
+
+/** What the backend did with a document uploaded from the chat (shown in the result panel). */
+export interface ServerResult {
+  projectId: string
+  documentId?: string
+  phase: 'uploading' | 'processing' | 'done' | 'error' | 'timeout'
+  doc?: BackendDoc
+  startedAt: number
+  finishedAt?: number
+  /** The assistant's reply about this document. */
+  response?: string
 }
 
 export interface ChatDoc {
@@ -80,6 +94,7 @@ export interface ChatDoc {
   pages?: number
   method?: string
   error?: string
+  server?: ServerResult
 }
 
 export interface ChatMessage {
@@ -87,6 +102,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
   docIds?: string[]
+  /** Assistant replies about one document link to its result panel. */
+  resultDocId?: string
 }
 
 export interface Chat {

@@ -99,7 +99,7 @@ export default function App() {
         <div className="view" hidden={view !== 'chat'}>
           <ChatView chats={chats} setChats={setChats} activeId={activeId}
             projects={projects} uploadProjectId={uploadProjectId} setUploadProjectId={setUploadProjectId}
-            refresh={refresh} goTo={setView} />
+            refresh={refresh} goTo={setView} findings={findings} onReview={onReview} />
         </div>
         {view === 'projects' && (
           <div className="view">

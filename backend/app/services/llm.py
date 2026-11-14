@@ -2,6 +2,7 @@
 from typing import Protocol, TypeVar
 
 from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -61,7 +62,29 @@ class GeminiProvider:
                 temperature=0.0,
             ),
         ))
+        self._record_usage(resp)
         return schema.model_validate_json(resp.text)  # raises if the model broke the schema
+
+    def _record_usage(self, resp) -> None:
+        """Attach Gemini's token counts and the model name to the current LangSmith run, so the project's
+        Tokens / Cost columns and Monitor charts are filled in. No-op when tracing is off."""
+        rt = get_current_run_tree()
+        if rt is None:
+            return
+        u = resp.usage_metadata
+        meta = {"ls_provider": "google_genai", "ls_model_name": self._model}
+        if u is None:
+            rt.set(metadata=meta)
+            return
+        inp = u.prompt_token_count or 0
+        out = (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)  # thinking tokens are billed as output
+        rt.set(metadata=meta, usage_metadata={
+            "input_tokens": inp,
+            "output_tokens": out,
+            "total_tokens": u.total_token_count or inp + out,
+            "input_token_details": {"cache_read": u.cached_content_token_count or 0},
+            "output_token_details": {"reasoning": u.thoughts_token_count or 0},
+        })
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         from google.genai import types

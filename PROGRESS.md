@@ -4,13 +4,69 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-14
+
+### Alembic migrations; chat tables added ✅
+**Why:** until now, `init_db` ran `create_all()`, which only creates missing tables, followed by hand-written `ALTER TABLE ... IF NOT EXISTS` statements, all on every startup. That approach keeps no history, has no undo, and can't safely rename columns, add foreign keys to existing tables or move data. The next schema steps need all three (for example, `review_comments` becomes `reviews`). It would also let the local database and Neon slowly drift apart.
+
+- **Alembic set up** (`backend/alembic.ini`, `backend/migrations/`, how-to in `backend/migrations/README.md`). `env.py` uses the app's own engine, so the URL and password stay in `.env` only.
+- **`0001` baseline:** the 8 existing tables, written out by hand. *Why:* the baseline must stay fixed even as the models change. Running `create_all` inside a migration would silently follow later model edits.
+- **`0002`:** `chats` and `chat_messages` (docs/schema.md tables 10 and 11), with indexes on every foreign key and on `(chat_id, created_at)` to load a chat's messages in order. Deleting a chat deletes its messages. Deleting a document keeps the message but clears its link.
+- **Startup now runs `alembic upgrade head`** (`backend/app/db/session.py`). A database created before Alembic gets a one-time handover: the old ALTERs add any missing columns, `rules.status` is made NOT NULL to match the model (it was the one difference found), and the database is recorded as `0001` before `0002` runs. *Why:* the existing data is kept rather than recreated.
+- The "is this an old database?" check looks only at the current schema. *Why:* Postgres reflection with no schema named also sees tables further down the search path, which made a fresh test schema look like an old database.
+- **Verified on throwaway schemas inside `fiberdoc`** (the app user can't create databases):
+  - Fresh database: upgrade, no differences from the models, downgrade to empty, upgrade again.
+  - Simulated pre-Alembic database: missing columns restored, an empty rule status filled, recorded as `0001`, chat tables added, no differences from the models, and `init_db` safe to run twice.
+- **Real database:** backed up first with `pg_dump` to `backend/data/backups/` (git-ignored), then migrated. It is at `0002` with no differences from the models; all rows are unchanged (1 project, 5 documents, 63 chunks, 15 findings, 20 rules).
+- **Dev server** now runs with `--reload-dir app`. *Why:* installing Alembic changed files in `.venv`, which uvicorn was watching, and the reload hung. The old `--reload-exclude "data/*"` pattern was also expanded by the shell into file names.
+
+**Status:** 107 tests passing, 4 skipped. The chat tables exist but nothing writes to them yet.
+
+**Next:** chat API endpoints (create, list, get chats and messages), the backend writing the result message when the workflow finishes, and the frontend loading saved chats instead of keeping them only in browser memory.
+
+### Result sidebar, LangSmith token usage, schema plan ✅
+**Why:** the upload result was only a chat message, LangSmith showed Gemini calls without token counts, and there was no written plan for which tables the blueprint needs.
+
+- **Result panel** (`frontend/src/ResultPanel.tsx`), opened automatically on upload or from "View details →":
+  - Live progress while the document uploads and is checked.
+  - The response message and document details (type, pages, size, processing time, SHA-256, ID).
+  - A summary count for each status, and links to the review queue and the report.
+  - The document's findings, sorted by status and then severity, with a "Hide passed" toggle.
+  - An "Extracted text" tab.
+
+  Findings are matched to their document by the new `documentId` field in the API.
+- **Token usage in LangSmith** (`_record_usage` in `backend/app/services/llm.py`). Gemini's input, output and thinking token counts and the model name are attached to each traced call, so LangSmith's Tokens and Cost columns are filled in. Tests are in `backend/tests/test_llm_usage.py`.
+- **Schema plan** (`docs/schema.md`): 14 tables in total (8 existing, 6 new), plus `geo_features` later. Each table is added in the roadmap step that first uses it.
+
 ## 2026-11-12
+
+### Full blueprint saved; findings use the blueprint's four statuses ✅
+**Why:** until today only sections 5 and 6 of the owner's blueprint were known. With all 12 sections available, two things in this morning's work didn't match it: the blueprint's statuses are *Passed, Failed, Missing evidence* and *Needs review*, and its risk formula weights "failed" (1.0) and "missing evidence" (0.7) differently. A single "non-compliant" status couldn't tell them apart, and the risk score will be built on top of these values.
+
+- **Blueprint in the repo.** [`docs/blueprint.md`](docs/blueprint.md) holds the full spec (sections 1–12), transcribed from the PDF. *Why:* it's the acceptance criteria. It should be versioned with the code, not kept only in a chat history.
+- **Four statuses** (`outcome` in `backend/app/workflow/graph.py`):
+  - `passed`: the requirement is met, with evidence.
+  - `failed`: evidence was found and it breaks the requirement (e.g. a 30 in. depth against a 36 in. minimum).
+  - `missing_evidence`: the check looked and found nothing to judge (no OTDR results, no depth stated, only one side of a comparison).
+  - `needs_review`: something was found but the automation couldn't decide.
+
+  Checks now set a `missing` flag when they find nothing (`backend/app/services/validators.py`). *Why:* "the cable is too shallow" and "the document doesn't say how deep the cable is" need different fixes from the engineer, and the blueprint scores them differently.
+- **Missing values handled the same way.** A missing minimum value (e.g. no burial depth) and a missing maximum value (e.g. no splice loss) are now both `missing_evidence`. Before, the first counted as a violation and the second as "could not verify".
+- **Stricter rule for Gemini answers** (`backend/app/services/semantic.py`). A "violates" answer counts as `failed` only when its quote appears in the document. Without a quote it becomes `needs_review`. A "complies" answer with an invented quote also becomes `needs_review`; before, it was reported as a violation. If Gemini says it found nothing relevant, the result is `missing_evidence`. *Why:* blueprint guardrail: "fail the result if citations are absent or invalid". An uncited claim, for or against, shouldn't count as a result.
+- **Recommended actions** follow the status. For missing evidence: "Add the evidence … or mark the rule not applicable", following the blueprint's example finding.
+- **Renamed in the database at startup** (`backend/app/db/session.py`), in case any findings already had the earlier values. None did: the 14 existing findings predate status.
+- **UI and report** show the new labels.
+- **Tests.** `backend/tests/test_traceability.py` covers the four statuses, the `missing` flag on each check type, and each kind of Gemini answer, using a fake LLM so no quota is used. End-to-end on the sample PDF: CON-007 is `failed`, DSN-018 is `missing_evidence`, PRM-002 is `needs_review`.
+
+**Status:** 104 tests passing, 4 skipped.
+
+**Next:** follows the new roadmap in `PROJECT_OVERVIEW.md` (Target design): classifier fix, Recall@3/@5, risk score and confidence, the 7-node workflow, then auth, API, GIS and deployment.
 
 ### Roadmap step 3: retrieval traceability and richer findings ✅
 **Why:** the owner's spec asks that every finding show *why* it exists: which rule (and which version of it) was applied, why that rule was picked for this document, what text was looked at, and what the reviewer should do. Before this, a finding stored only one quote and an explanation. A reviewer couldn't tell whether a rule was checked against the whole document or just a few excerpts, and nothing recorded which rules were retrieved but produced no finding, which the Recall@K eval (step 4) needs.
 
 - **New finding fields** (`backend/app/db/models.py`, added to existing databases at startup in `backend/app/db/session.py`):
-  - `status`: `compliant`, `non_compliant` or `unverified`. *Why:* this is the result of the automatic check, kept separate from the human `decision`. Before, "requirement met" could only be read from the title.
+  - `status`: `compliant`, `non_compliant` or `unverified` (replaced later the same day by the blueprint's four statuses, see above). *Why:* this is the result of the automatic check, kept separate from the human `decision`. Before, "requirement met" could only be read from the title.
   - `evidence`: a list of `{page, quote}`. A consistency check (DSN-003) now cites **both** numbers it compared, not just the first. *Why:* a mismatch can't be judged from one side of it.
   - `source_pages_checked`: every page for deterministic checks; only the excerpt pages for Gemini checks. *Why:* "not found on pages 2, 5" means something different from "not found anywhere".
   - `recommended_action` and `needs_human_review`, both derived from the check result in plain Python (`outcome` in `backend/app/workflow/graph.py`). *Why:* the LLM should not write instructions, and the wording should be the same every time. `needs_human_review` means the automation couldn't settle the rule; every finding still waits for a human decision either way.

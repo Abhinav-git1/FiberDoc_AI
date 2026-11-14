@@ -135,9 +135,37 @@
 
 .banner.demo { padding: 6px 20px; font-size: 12px; background: color-mix(in srgb, var(--accent, #6c5ce7) 10%, transparent); }
 .badge.status { background: var(--bg-hover); color: var(--muted); }
-.badge.status.non_compliant { color: var(--danger); }
-.badge.status.compliant { color: var(--ok); }
+.badge.status.failed { color: var(--danger); }
+.badge.status.missing_evidence { color: #d98a00; }
+.badge.status.passed { color: var(--ok); }
 .finding-body .trace { margin-top: 4px; }
 .finding-body .trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .finding-body .trace p { margin: 6px 0; font-size: 13px; }
 .finding-body blockquote.excerpt { font-size: 12px; margin-bottom: 6px; white-space: pre-wrap; }
+
+/* Result panel (chat sidebar for an uploaded document) */
+.panel-tabs { display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.panel-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 8px; color: var(--muted); cursor: pointer; font: inherit; display: inline-flex; gap: 6px; align-items: center; }
+.panel-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.panel-tabs .count { font-size: 11px; background: var(--bg-hover); border-radius: 10px; padding: 0 6px; }
+.panel-section { margin-bottom: 18px; }
+.panel-section h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.panel-section-head { display: flex; justify-content: space-between; align-items: center; }
+.panel-section p { margin: 0 0 8px; line-height: 1.5; }
+.details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.stat { border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.stat-num { font-size: 20px; font-weight: 600; }
+.stat-label { font-size: 11px; color: var(--muted); }
+.stat.status-failed .stat-num { color: var(--danger); }
+.stat.status-missing_evidence .stat-num { color: #d98a00; }
+.stat.status-passed .stat-num { color: var(--ok); }
+.panel-actions, .msg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+a.chip { text-decoration: none; color: inherit; }
+.toggle { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; cursor: pointer; }
+.progress.indeterminate .bar > div { width: 40%; animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .progress.indeterminate .bar > div { animation: none; width: 100%; opacity: .5; } }

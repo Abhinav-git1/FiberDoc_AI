@@ -32,7 +32,7 @@ python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env        # add GEMINI_API_KEY
 python -m app.workflow.seed_rules   # seeds + embeds rules
-uvicorn app.main:app --reload       # http://localhost:8000/docs
+uvicorn app.main:app --reload --reload-dir app   # http://localhost:8000/docs; migrations run at startup
 pytest
 ```
 
@@ -45,4 +45,4 @@ Then in `frontend/src/api.ts` replace the mock functions with `fetch` calls to `
 
 ## Not yet built
 Auth (users table exists, no login), PostGIS/GeoJSON extension, LangSmith tracing/eval dataset, Cloud Run deploy config,
-Alembic migrations (tables are created at startup), React/Playwright tests.
+React/Playwright tests. Schema changes: see `migrations/README.md`.

@@ -15,6 +15,7 @@ dist/
 
 # runtime data: uploaded originals
 backend/data/uploads/
+backend/data/backups/
 
 # editor / OS
 .vscode/

@@ -1,9 +1,11 @@
-"""Users · Projects · Documents · Chunks · Rules · Findings · Reviews · Audit events."""
+"""Users · Projects · Documents · Chunks · Rules · Findings · Reviews · Audit events · Chats.
+
+Changing a table? Add an Alembic migration too (see migrations/README.md)."""
 import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import get_settings
@@ -98,7 +100,7 @@ class Finding(Base):
     evidence_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
     explanation: Mapped[str] = mapped_column(Text)
-    # Outcome of the automatic check, separate from the human `decision`: compliant | non_compliant | unverified.
+    # Outcome of the automatic check, separate from the human `decision`: passed | failed | missing_evidence | needs_review.
     # Nullable because findings created before these columns existed don't have them.
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     evidence: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{page, quote}]; evidence_page/quote = first item
@@ -136,3 +138,30 @@ class AuditEvent(Base):
     entity: Mapped[str] = mapped_column(String)
     entity_id: Mapped[str] = mapped_column(String)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Chat(Base):
+    __tablename__ = "chats"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)  # set once auth exists
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String, default="New chat")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)  # orders "Recent chats"
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan", order_by="ChatMessage.created_at"
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (Index("ix_chat_messages_chat_id_created_at", "chat_id", "created_at"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String)  # user | assistant
+    text: Mapped[str] = mapped_column(Text)
+    # The upload this message is about (opens its result panel). Kept if the document is deleted, minus the link.
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String, default="text")  # text | upload | result | error
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    chat: Mapped[Chat] = relationship(back_populates="messages")

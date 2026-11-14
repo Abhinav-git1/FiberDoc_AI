@@ -8,8 +8,11 @@ from app.services.validators import Chunk, quote_is_grounded
 
 
 def evaluate_semantic_rule(rule_id: str, rule_text: str, evidence: list[Chunk]) -> dict | None:
-    """Return a raw finding dict (source/passed/explanation/page/quote), or None when the
-    document complies WITH grounded evidence (no finding needed)."""
+    """Return a raw finding dict (source/passed/missing/explanation/page/quote), or None when the
+    document complies WITH grounded evidence (no finding needed).
+
+    Only a grounded quote can make a result definite. A "complies" or "violates" answer whose quote is not in the
+    excerpts becomes undecided (needs review): an uncited claim is not accepted as a result."""
     context = "\n\n".join(f"[page {c.page}]\n{c.text}" for c in evidence)
     try:
         r = get_llm().generate_structured(
@@ -20,12 +23,19 @@ def evaluate_semantic_rule(rule_id: str, rule_text: str, evidence: list[Chunk]) 
             EvidenceCheck,
         )
     except Exception as e:  # LLM failure must not fabricate a result
-        return dict(source="ai", passed=None, page=None, quote=None,
+        return dict(source="ai", passed=None, missing=False, page=None, quote=None,
                     explanation=f"Automatic interpretation failed ({type(e).__name__}); manual review needed.")
     grounded = quote_is_grounded(r.quote, evidence)
     quote, page = (r.quote, r.page) if grounded else (None, None)
     if r.complies == "yes" and grounded:
         return None  # compliant with evidence: no finding
-    return dict(source="ai", passed=None if r.complies == "unclear" else False,
-                explanation=r.explanation if grounded or r.complies != "yes" else "Evidence could not be verified.",
-                page=page, quote=quote)
+    if r.complies == "no" and grounded:
+        return dict(source="ai", passed=False, missing=False, explanation=r.explanation, page=page, quote=quote)
+    if r.complies == "no" and not r.found_relevant_text:
+        return dict(source="ai", passed=False, missing=True, explanation=r.explanation, page=None, quote=None)
+    if r.complies == "unclear":
+        return dict(source="ai", passed=None, missing=False, explanation=r.explanation, page=page, quote=quote)
+    # "yes" or "no" without a quote that appears in the excerpts
+    return dict(source="ai", passed=None, missing=False, page=None, quote=None,
+                explanation=f"The AI answered '{r.complies}', but its quote could not be found in the document, "
+                            f"so the answer was not accepted. Its reasoning: {r.explanation}")

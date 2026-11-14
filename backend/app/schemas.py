@@ -7,7 +7,7 @@ from pydantic.alias_generators import to_camel
 Severity = Literal["high", "medium", "low"]
 Decision = Literal["pending", "approved", "rejected", "changes_requested"]
 FindingSource = Literal["rule", "ai"]
-FindingStatus = Literal["compliant", "non_compliant", "unverified"]
+FindingStatus = Literal["passed", "failed", "missing_evidence", "needs_review"]
 
 
 class CamelModel(BaseModel):
@@ -29,6 +29,7 @@ class EvidenceOut(CamelModel):
 class FindingOut(CamelModel):
     id: str
     project_id: str
+    document_id: str
     doc_name: str
     title: str
     severity: Severity

@@ -34,7 +34,7 @@ def _rule_provenance(rule) -> str:
     return f" ({e(', '.join(bits))})" if bits else ""
 
 
-STATUS_LABEL = {"compliant": "Compliant", "non_compliant": "Non-compliant", "unverified": "Could not verify"}
+STATUS_LABEL = {"passed": "Passed", "failed": "Failed", "missing_evidence": "Missing evidence", "needs_review": "Needs review"}
 
 
 def _evidence_items(f) -> list[tuple[int | None, str]]:

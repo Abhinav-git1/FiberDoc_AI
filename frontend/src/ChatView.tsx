@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { extractText } from './ocr'
-import { listDocuments, listFindings, uploadDocument } from './api'
-import type { Chat, ChatDoc, Finding, Project } from './types'
+import { listDocuments, uploadDocument } from './api'
+import ResultPanel from './ResultPanel'
+import type { Chat, ChatDoc, Decision, Finding, Project, ServerResult } from './types'
 
 /** The backend accepts PDF, DOCX and XLSX (see backend/app/services/document_parser.py). */
 const UPLOAD_EXTENSIONS = ['.pdf', '.docx', '.xlsx']
@@ -30,9 +31,12 @@ interface Props {
   /** Reload projects + findings from the backend; resolves with the fresh findings. */
   refresh: () => Promise<Finding[]>
   goTo: (view: 'findings' | 'review') => void
+  /** All findings (kept fresh by App), so reviews made in the panel show up everywhere. */
+  findings: Finding[]
+  onReview: (id: string, decision: Decision, comment: string) => Promise<void>
 }
 
-export default function ChatView({ chats, setChats, activeId, projects, uploadProjectId, setUploadProjectId, refresh, goTo }: Props) {
+export default function ChatView({ chats, setChats, activeId, projects, uploadProjectId, setUploadProjectId, refresh, goTo, findings, onReview }: Props) {
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<{ id: string; file: File }[]>([])
   const [viewDoc, setViewDoc] = useState<string | null>(null)
@@ -45,6 +49,10 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
   const patchChat = (id: string, fn: (c: Chat) => Chat) => setChats((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
   const patchDoc = (chatId: string, docId: string, patch: Partial<ChatDoc>) =>
     patchChat(chatId, (c) => ({ ...c, docs: c.docs.map((d) => (d.id === docId ? { ...d, ...patch } : d)) }))
+  const patchServer = (chatId: string, docId: string, patch: Partial<ServerResult>) =>
+    patchChat(chatId, (c) => ({
+      ...c, docs: c.docs.map((d) => (d.id === docId && d.server ? { ...d, server: { ...d.server, ...patch } } : d)),
+    }))
 
   useEffect(() => { setViewDoc(null); setPending([]) }, [activeId])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.messages.length])
@@ -61,15 +69,22 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
     if (files.length) setPending((p) => [...p, ...files.map((f) => ({ id: uid(), file: f }))])
   }
 
-  const say = (chatId: string, text: string) =>
-    patchChat(chatId, (c) => ({ ...c, messages: [...c.messages, { id: uid(), role: 'assistant', text }] }))
+  const say = (chatId: string, text: string, resultDocId?: string) =>
+    patchChat(chatId, (c) => ({ ...c, messages: [...c.messages, { id: uid(), role: 'assistant', text, resultDocId }] }))
 
-  /** Upload to the backend, wait for the background workflow, then report the result in the chat. */
+  /** Upload to the backend, wait for the background workflow, then report the result in the chat and the panel. */
   async function submitToBackend(chatId: string, projectId: string, doc: ChatDoc) {
+    const startedAt = Date.now()
+    patchDoc(chatId, doc.id, { server: { projectId, phase: 'uploading', startedAt } })
+    const finish = (phase: ServerResult['phase'], response: string, extra: Partial<ServerResult> = {}) => {
+      patchServer(chatId, doc.id, { phase, response, finishedAt: Date.now(), ...extra })
+      say(chatId, response, doc.id)
+      setViewDoc(doc.id)
+    }
     try {
-      const before = (await listFindings(projectId)).filter((f) => f.docName === doc.name).length
       const uploaded = await uploadDocument(projectId, doc.file)
-      say(chatId, `Uploaded ${doc.name}. Extracting text and running the rule checks. This can take a minute.`)
+      patchServer(chatId, doc.id, { phase: 'processing', documentId: uploaded.id, doc: uploaded })
+      say(chatId, `Uploaded ${doc.name}. Extracting text and running the rule checks. This can take a minute.`, doc.id)
 
       let current = uploaded
       for (let i = 0; i < 120 && current.status === 'processing'; i++) { // up to ~6 minutes
@@ -79,20 +94,23 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
 
       const all = await refresh()
       if (current.status === 'error') {
-        say(chatId, `Processing ${doc.name} failed: ${current.error ?? 'unknown error'}`)
+        finish('error', `Processing ${doc.name} failed: ${current.error ?? 'unknown error'}`, { doc: current })
       } else if (current.status === 'processing') {
-        say(chatId, `${doc.name} is still processing. Check the Findings page in a few minutes.`)
+        finish('timeout', `${doc.name} is still processing. Check the Findings page in a few minutes.`, { doc: current })
       } else {
-        const mine = all.filter((f) => f.projectId === projectId && f.docName === doc.name)
-        const fresh = mine.slice(before)
-        const n = (s: string) => fresh.filter((f) => f.severity === s).length
-        say(chatId,
-          `Finished ${doc.name} (${current.pageCount} page${current.pageCount === 1 ? '' : 's'}, classified as ${current.docType.replace('_', ' ')}).\n` +
-          `${fresh.length} finding${fresh.length === 1 ? '' : 's'}: ${n('high')} high, ${n('medium')} medium, ${n('low')} low. ` +
-          `They are waiting for a human reviewer. Nothing is approved automatically.`)
+        const mine = all.filter((f) => f.documentId === uploaded.id)
+        const open = mine.filter((f) => f.status !== 'passed')
+        const count = (st: string) => mine.filter((f) => f.status === st).length
+        finish('done',
+          `Finished ${doc.name} (${current.pageCount} page${current.pageCount === 1 ? '' : 's'}, classified as ${current.docType.replace(/_/g, ' ')}). ` +
+          `Checked ${mine.length} rule${mine.length === 1 ? '' : 's'}: ${count('failed')} failed, ${count('missing_evidence')} missing evidence, ` +
+          `${count('needs_review')} need review, ${count('passed')} passed. ` +
+          (open.length ? `The ${open.length} open issue${open.length === 1 ? ' is' : 's are'} waiting for a human reviewer. ` : '') +
+          `Nothing is approved automatically.`,
+          { doc: current })
       }
     } catch (e) {
-      say(chatId, `Could not process ${doc.name}: ${e instanceof Error ? e.message : String(e)}`)
+      finish('error', `Could not process ${doc.name}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -133,6 +151,7 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
       say(chatId, 'Create or select a project first (Projects page, or the project picker below), then attach the document again.')
     } else {
       docs.forEach((d) => submitToBackend(chatId, uploadProjectId, d))
+      setViewDoc(docs[0].id) // open the panel straight away so progress is visible
     }
   }
 
@@ -167,8 +186,13 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
                       return d && <DocCard key={id} doc={d} onOpen={() => setViewDoc(d.id)} />
                     })}
                     {m.text && <p>{m.text}</p>}
-                    {m.role === 'assistant' && /waiting for a human reviewer/.test(m.text) && (
-                      <button className="chip" onClick={() => goTo('review')}>Open review queue →</button>
+                    {m.role === 'assistant' && (m.resultDocId || /waiting for a human reviewer/.test(m.text)) && (
+                      <div className="msg-actions">
+                        {m.resultDocId && <button className="chip" onClick={() => setViewDoc(m.resultDocId!)}>View details →</button>}
+                        {/waiting for a human reviewer/.test(m.text) && (
+                          <button className="chip" onClick={() => goTo('review')}>Open review queue →</button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -212,20 +236,8 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
       </div>
 
       {shownDoc && (
-        <aside className="docpanel">
-          <div className="docpanel-head">
-            <div>
-              <strong>{shownDoc.name}</strong>
-              <div className="muted">{shownDoc.status === 'done' ? `${shownDoc.pages} page(s) · ${shownDoc.method}` : shownDoc.status}</div>
-            </div>
-            <button className="icon-btn" onClick={() => setViewDoc(null)}>×</button>
-          </div>
-          <div className="docpanel-body">
-            {shownDoc.status === 'processing' && <Progress doc={shownDoc} />}
-            {shownDoc.status === 'error' && <p className="err">OCR failed: {shownDoc.error}</p>}
-            {shownDoc.status === 'done' && <pre>{shownDoc.text || '(No text detected)'}</pre>}
-          </div>
-        </aside>
+        <ResultPanel key={shownDoc.id} doc={shownDoc} findings={findings} projects={projects}
+          onReview={onReview} onClose={() => setViewDoc(null)} goTo={goTo} />
       )}
 
       {dragging && <div className="drop-overlay">Drop documents to upload</div>}
@@ -242,6 +254,14 @@ function Progress({ doc }: { doc: ChatDoc }) {
   )
 }
 
+const SERVER_LABEL: Record<ServerResult['phase'], string> = {
+  uploading: 'uploading',
+  processing: 'checking rules',
+  done: 'checked',
+  error: 'failed',
+  timeout: 'still processing',
+}
+
 function DocCard({ doc, onOpen }: { doc: ChatDoc; onOpen: () => void }) {
   return (
     <button className="doccard" onClick={onOpen}>
@@ -249,9 +269,10 @@ function DocCard({ doc, onOpen }: { doc: ChatDoc; onOpen: () => void }) {
       <span className="doc-meta">
         <span className="doc-name">{doc.name}</span>
         <span className="muted">
-          {doc.status === 'processing' && <Progress doc={doc} />}
-          {doc.status === 'done' && `${fmtSize(doc.size)} · ${doc.method === 'server' ? 'sent to server' : 'preview ready · view text'}`}
-          {doc.status === 'error' && 'OCR failed'}
+          {doc.server ? `${fmtSize(doc.size)} · ${SERVER_LABEL[doc.server.phase]} · view details`
+            : doc.status === 'processing' ? <Progress doc={doc} />
+            : doc.status === 'done' ? `${fmtSize(doc.size)} · preview ready · view text`
+            : 'Text preview failed'}
         </span>
       </span>
     </button>

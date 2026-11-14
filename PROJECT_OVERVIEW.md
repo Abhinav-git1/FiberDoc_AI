@@ -226,23 +226,39 @@ sequenceDiagram
 | **Downloadable report** (`GET /api/projects/{id}/report`) | **Built.** Self-contained HTML with summary, documents, findings, evidence, decisions and comments; "Download report" button on the Findings page (project selected) |
 | `GEMINI_API_KEY` | Set in `backend/.env`. Models in use: `gemini-embedding-001` (768-dim) and `gemini-3.8-flash`. Gemini calls retry transient 503/429 errors |
 | Evaluation set | Offline: `backend/tests/test_eval_rules.py` runs the deterministic rules on the defective sample PDF (S4), a compliant one (S5) and an undeterminable case. Live: `backend/tests/test_eval_semantic.py` checks PRM-002 / LBL-001 against S4-S7 using real Gemini calls; skipped unless `RUN_LIVE_EVAL=1`, and skips when Gemini is unavailable. **Live cases have not yet passed**: the free-tier daily quota (20 requests/day on `gemini-3.8-flash`) ran out on 2026-11-09. Generators: `sample_docs/make_sample.py`, `make_variants.py`. 24 offline tests pass |
-| Checksum + original storage | **Built.** `documents.sha256` / `stored_path`, `app/services/storage.py`, `tests/test_storage.py`. New columns are added at startup with `ALTER TABLE … IF NOT EXISTS` (no Alembic yet). Stored files are not yet served back or deleted with their project |
+| Checksum + original storage | **Built.** `documents.sha256` / `stored_path`, `app/services/storage.py`, `tests/test_storage.py`. Schema changes are Alembic migrations (`backend/migrations/`), applied at startup. Stored files are not yet served back or deleted with their project |
 | Rule catalogue metadata | **Built.** Each rule has `source_name`, `section`, `jurisdiction`, `standard_family`, `version`, `effective_date`, `status` (placeholder values `DEMO-REGION-A` / `DEMO-STD-1` / `0.2`). `retrieve_rules` filters on `status='approved'` and optional jurisdiction / standard family BEFORE ranking. The catalogue is labelled **non-authoritative** in the report, in the UI banner and in `seed_rules.py` |
 | Demo rule catalogue | **Built.** 20 rules in 8 sections (QA, Design, Construction, Permits, Labelling, Safety, As-built, Splicing) in `backend/reference/demo_rule_catalogue.md`, marked NON-AUTHORITATIVE. `seed_rules.py` parses and validates it (severity, document types, regexes, duplicate IDs) and syncs the database on startup: changed text clears the rule's embedding so it is re-embedded, and rules removed from the file are marked `retired`, not deleted. 18 rules are deterministic and only 2 use Gemini. Every rule has a passing and a failing example, which `tests/test_catalogue.py` runs |
-| Finding traceability | **Built.** Each finding stores a check status (compliant / non_compliant / unverified), all evidence quotes (both sides of a consistency check), pages checked, a deterministic recommended action, a needs-human-review flag, and a retrieval trace. The audit event lists every retrieved rule with scores (input for the future Recall@K eval). Findings created before 2026-11-12 have `null` for these fields |
+| Finding traceability | **Built.** Each finding stores a check status (passed / failed / missing_evidence / needs_review, as in the blueprint), all evidence quotes (both sides of a consistency check), pages checked, a deterministic recommended action, a needs-human-review flag, and a retrieval trace. The audit event lists every retrieved rule with scores (input for the future Recall@K eval). Findings created before 2026-11-12 have `null` for these fields |
 | Classification | **Known issue.** Keyword hits are counted over the whole text with equal weight, so a construction plan with "Design summary" section headings is classified as `design_summary`, and construction-only rules are skipped |
 | Chat Q&A | Not built (the chat says so) |
 | Undeterminable checks | A deterministic check that cannot find its data (e.g. only one of two numbers) now raises a "Could not verify automatically… Manual review needed" finding (`validate` in `graph.py`) |
 | Auth | Not built (`users` table exists, no login; reviewer is hard-coded as "Reviewer") |
-| Not built yet | PostGIS/GeoJSON, LangSmith eval dataset, Cloud Run deployment, Alembic migrations (tables are created at startup), React/Playwright tests |
+| Not built yet | PostGIS/GeoJSON, LangSmith eval dataset, Cloud Run deployment, React/Playwright tests |
 
-### Target design (spec from the project owner; not fully built)
-Sections 5 and 6 of the owner's spec call for: 7 graph nodes (Intake, Extract, Retrieve, Validate, Risk score, Human review with a real pause/resume and persisted checkpoints, Report), a typed state with `extracted_sections`, `retrieved_rules`, `risk_score`, `reviewer_decisions`, `report_version`, `errors`, `workflow_status`; findings shaped as `{rule_id, status, severity, requirement, evidence[], source_pages_checked[], explanation, recommended_action, needs_human_review}`; a 15-30 rule demo knowledge base ingested from a reference document with rule-sized chunks; retrieved rule IDs and excerpts stored with each finding; Recall@K evaluation of rule retrieval. Today's code implements 5 nodes with the graph ending at `human_review`, the 20-rule catalogue ingested from a reference document, and the spec's finding fields and retrieval traceability. Recall@K, pause/resume with checkpoints and the Report node are not built yet.
+### Target design: the blueprint (not fully built)
+The full spec is in [`docs/blueprint.md`](docs/blueprint.md). Where the build stands against it:
+
+| Blueprint section | Built | Missing |
+|---|---|---|
+| 1–2 Purpose, user journey | Upload with checksum, extraction with pages, retrieval, validation, review, report, non-authoritative labels | Document *sections* (only pages are tracked) |
+| 3–4 Architecture, stack | FastAPI, Pydantic, LangGraph, Gemini behind a provider interface, pgvector, parsers, LangSmith, pytest | MUI, Docker + Cloud Run deployment, React Testing Library, Playwright, auth |
+| 5 Workflow | 5-node graph (the section 3 diagram); finding fields from the example JSON; four statuses | Intake / Extract / Report nodes, checkpointed pause/resume, typed state, versioned reports; classifier mislabels construction plans |
+| 6 RAG | 20 rules from a reference document, rule-sized chunks, all metadata, filters before ranking, hybrid ranking, retrieved IDs and excerpts on each finding | Query built from doc type + requirement (rules are matched against the averaged whole document), Recall@K |
+| 7 Risk, confidence | Per-rule severity | 5/3/1 × status-multiplier score (0–100), risk band, completeness score, confidence reasons |
+| 8 Database | users, projects, documents, chunks, rules, findings, comments, audit events | `rule_chunks`, `reviews` (reviewer_id, reviewed_at), chunk `section`, document `version`, project region/type, `updated_at`, `confidence_reason`, indexes, migrations |
+| 9–10 API, screens | Projects, upload, findings, review, project report; dashboard, upload, findings, review queue | Login, `/documents/{id}/…` endpoints, separate `/validate`, audit timeline, summary score, decision history |
+| 11 GIS | – | GeoJSON boundary/points, coordinate checks, PostGIS point-in-boundary, Leaflet map |
+| 12 Eval, guardrails | Pydantic output, deterministic arithmetic, human approval, "insufficient evidence", grounded quotes, timeout/duplicate handling, about 7 eval cases | 10–20 labelled files, Recall@3/@5, finding precision/recall, run logging (run ID, node, latency, tokens, model), cited rule IDs checked against retrieved ones, prompt-injection handling, versioned prompts and models |
 
 ### Suggested next steps
-1. Fix document classification (weight the title above section headings), then Recall@K for rule retrieval.
-2. Run the live semantic evaluation once the Gemini quota allows, and tune the PRM-002 / LBL-001 prompts from the LangSmith traces.
-3. Add auth, so reviewer names in the audit trail are real; then consider deployment.
+1. Fix document classification (weight the title above section headings).
+2. Recall@3 / Recall@5 on 10–20 labelled cases, plus finding precision and recall. Then fix the retrieval query direction if the numbers show it's needed.
+3. Risk score and confidence reasons (section 7), shown in the report and UI.
+4. 7-node workflow with checkpointed pause/resume and versioned reports.
+5. Auth, document-level API, audit timeline.
+6. GIS extension.
+7. Docker + Cloud Run deployment and Playwright tests, last, once the features are stable.
 
 ---
 
@@ -258,7 +274,7 @@ Sections 5 and 6 of the owner's spec call for: 7 graph nodes (Intake, Extract, R
 # Backend (from backend/)
 .venv\Scripts\activate
 python -m app.workflow.seed_rules      # needs GEMINI_API_KEY
-uvicorn app.main:app --reload          # http://localhost:8000/docs
+uvicorn app.main:app --reload --reload-dir app   # http://localhost:8000/docs; migrations run at startup
 
 # Frontend (from frontend/)
 npm install
