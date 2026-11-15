@@ -1,4 +1,5 @@
 """Pydantic schemas. JSON is camelCase to match frontend/src/types.ts."""
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -36,6 +37,7 @@ class FindingOut(CamelModel):
     source: FindingSource
     rule_id: str
     rule_text: str
+    rule_section: str | None = None  # catalogue section of the rule, e.g. "Construction"; groups the results
     evidence: EvidenceOut | None  # first item of evidence_list (kept for older clients)
     evidence_list: list[EvidenceOut]
     explanation: str
@@ -70,6 +72,42 @@ class DocumentOut(CamelModel):
     page_count: int
     error: str | None = None
     sha256: str | None = None
+    size_bytes: int | None = None  # of the stored original; None if the file is gone
+    created_at: datetime | None = None
+
+
+class ChatIn(CamelModel):
+    title: str = "New chat"
+    project_id: str | None = None
+
+
+class ChatSummaryOut(CamelModel):
+    id: str
+    title: str
+    project_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MessageIn(CamelModel):
+    role: Literal["user", "assistant"]
+    text: str
+    # `upload` and `result` messages are written only by the backend, so a client can't fake a check result.
+    kind: Literal["text", "error"] = "text"
+
+
+class MessageOut(CamelModel):
+    id: str
+    role: Literal["user", "assistant"]
+    text: str
+    kind: Literal["text", "upload", "result", "error"]
+    document_id: str | None
+    created_at: datetime
+
+
+class ChatOut(ChatSummaryOut):
+    messages: list[MessageOut]
+    documents: list[DocumentOut]  # every document the messages refer to, to rebuild the result panel
 
 
 class ReviewIn(CamelModel):

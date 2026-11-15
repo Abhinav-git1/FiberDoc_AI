@@ -21,3 +21,6 @@ backend/data/backups/
 .vscode/
 .idea/
 .DS_Store
+
+# TypeScript incremental build cache (changes on every type-check)
+*.tsbuildinfo

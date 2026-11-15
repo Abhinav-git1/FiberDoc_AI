@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { extractText } from './ocr'
-import { listDocuments, uploadDocument } from './api'
+import { createChat, getChat, listDocuments, postMessage, uploadDocument } from './api'
 import ResultPanel from './ResultPanel'
-import type { Chat, ChatDoc, Decision, Finding, Project, ServerResult } from './types'
+import { fromSaved, stillProcessing } from './savedChat'
+import type { BackendDoc, Chat, ChatDoc, Decision, Finding, Project, ServerResult } from './types'
 
 /** The backend accepts PDF, DOCX and XLSX (see backend/app/services/document_parser.py). */
 const UPLOAD_EXTENSIONS = ['.pdf', '.docx', '.xlsx']
@@ -44,6 +45,8 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
   const fileRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  /** Chats being created on the server, so two quick sends don't create two. */
+  const savingRef = useRef(new Map<string, Promise<string | undefined>>())
 
   const chat = chats.find((c) => c.id === activeId)!
   const patchChat = (id: string, fn: (c: Chat) => Chat) => setChats((cs) => cs.map((c) => (c.id === id ? fn(c) : c)))
@@ -55,6 +58,41 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
     }))
 
   useEffect(() => { setViewDoc(null); setPending([]) }, [activeId])
+
+  // A saved chat opened from the sidebar: fetch its messages and documents once.
+  useEffect(() => {
+    if (!chat.serverId || chat.loaded !== false) return
+    const { id, serverId } = chat
+    let cancelled = false
+    getChat(serverId)
+      .then((saved) => { if (!cancelled) setChats((cs) => cs.map((c) => (c.id === id ? fromSaved(saved) : c))) })
+      .catch((e: Error) => {
+        if (!cancelled) patchChat(id, (c) => ({ ...c, loaded: true, messages: [{ id: uid(), role: 'assistant', text: `Could not load this chat: ${e.message}` }] }))
+      })
+    return () => { cancelled = true }
+  }, [chat.id, chat.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A reopened chat whose document is still being checked: nothing in this tab is polling it, so check every 5 s
+  // and take the saved result once it's there. Documents sent in this session are watched by submitToBackend.
+  const reopenedBusy = !!chat.serverId && chat.docs.some((d) => !d.file && d.server?.phase === 'processing')
+  useEffect(() => {
+    if (!reopenedBusy || !chat.serverId) return
+    const { id, serverId } = chat
+    const t = setInterval(async () => {
+      const raw = await getChat(serverId).catch(() => null)
+      if (!raw) return
+      const saved = fromSaved(raw)
+      if (stillProcessing(saved)) return
+      setChats((cs) => cs.map((c) => c.id !== id ? c : {
+        ...c,
+        docs: c.docs.map((d) => (d.file ? d : saved.docs.find((x) => x.id === d.id) ?? d)),
+        messages: [...c.messages, ...saved.messages.filter((m) => m.resultDocId && !c.docs.find((d) => d.id === m.resultDocId)?.file
+          && !c.messages.some((x) => x.id === m.id))],
+      }))
+      refresh().catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [reopenedBusy, chat.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.messages.length])
   useEffect(() => {
     const ta = taRef.current
@@ -71,9 +109,39 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
 
   const say = (chatId: string, text: string, resultDocId?: string) =>
     patchChat(chatId, (c) => ({ ...c, messages: [...c.messages, { id: uid(), role: 'assistant', text, resultDocId }] }))
+  /** An assistant message the backend doesn't write itself; saved so it's there when the chat is reopened. */
+  const sayAndSave = (chatId: string, serverId: string | undefined, text: string) => {
+    say(chatId, text)
+    if (serverId) postMessage(serverId, 'assistant', text).catch(() => {})
+  }
+
+  /** Save the chat on the server on its first message. Resolves to its server ID, or undefined if that failed
+   * (the chat then works as before, in this tab only). */
+  function ensureSaved(c: Chat, title: string, projectId: string): Promise<string | undefined> {
+    if (c.serverId) return Promise.resolve(c.serverId)
+    const m = savingRef.current
+    if (!m.has(c.id)) {
+      m.set(c.id, createChat(title, projectId)
+        .then((saved) => { patchChat(c.id, (x) => ({ ...x, serverId: saved.id, loaded: true })); return saved.id })
+        .catch(() => { m.delete(c.id); return undefined }))
+    }
+    return m.get(c.id)!
+  }
+
+  /** The result message the backend saved for this document. It's written just after the status changes,
+   * so retry briefly. */
+  async function savedOutcome(serverId: string, documentId: string): Promise<string | undefined> {
+    for (let i = 0; i < 4; i++) {
+      const saved = await getChat(serverId).catch(() => null)
+      const m = saved?.messages.find((x) => x.documentId === documentId && (x.kind === 'result' || x.kind === 'error'))
+      if (m) return m.text
+      await sleep(1000)
+    }
+    return undefined
+  }
 
   /** Upload to the backend, wait for the background workflow, then report the result in the chat and the panel. */
-  async function submitToBackend(chatId: string, projectId: string, doc: ChatDoc) {
+  async function submitToBackend(chatId: string, serverId: string | undefined, projectId: string, doc: ChatDoc) {
     const startedAt = Date.now()
     patchDoc(chatId, doc.id, { server: { projectId, phase: 'uploading', startedAt } })
     const finish = (phase: ServerResult['phase'], response: string, extra: Partial<ServerResult> = {}) => {
@@ -81,8 +149,16 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
       say(chatId, response, doc.id)
       setViewDoc(doc.id)
     }
+    let uploaded: BackendDoc
     try {
-      const uploaded = await uploadDocument(projectId, doc.file)
+      uploaded = await uploadDocument(projectId, doc.file!, serverId)
+    } catch (e) { // rejected before a document existed, so the backend saved nothing about it
+      const text = `Could not process ${doc.name}: ${e instanceof Error ? e.message : String(e)}`
+      finish('error', text)
+      if (serverId) postMessage(serverId, 'assistant', text, 'error').catch(() => {})
+      return
+    }
+    try {
       patchServer(chatId, doc.id, { phase: 'processing', documentId: uploaded.id, doc: uploaded })
       say(chatId, `Uploaded ${doc.name}. Extracting text and running the rule checks. This can take a minute.`, doc.id)
 
@@ -93,7 +169,11 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
       }
 
       const all = await refresh()
-      if (current.status === 'error') {
+      // Prefer the message the backend saved, so this tab shows exactly what a reopened chat will show.
+      const saved = serverId && current.status !== 'processing' ? await savedOutcome(serverId, uploaded.id) : undefined
+      if (saved) {
+        finish(current.status === 'error' ? 'error' : 'done', saved, { doc: current })
+      } else if (current.status === 'error') {
         finish('error', `Processing ${doc.name} failed: ${current.error ?? 'unknown error'}`, { doc: current })
       } else if (current.status === 'processing') {
         finish('timeout', `${doc.name} is still processing. Check the Findings page in a few minutes.`, { doc: current })
@@ -115,6 +195,7 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
   }
 
   async function runOcr(chatId: string, doc: ChatDoc) {
+    if (!doc.file) return
     if (!isPdf(doc.file)) { // DOCX/XLSX: no browser preview, the server extracts them
       patchDoc(chatId, doc.id, { status: 'done', progress: 1, method: 'server', pages: undefined,
         text: 'No browser preview for this file type. The server extracts and checks it.' })
@@ -128,30 +209,34 @@ export default function ChatView({ chats, setChats, activeId, projects, uploadPr
     }
   }
 
-  function send(text = input) {
+  async function send(text = input) {
     const trimmed = text.trim()
     if (!trimmed && !pending.length) return
     const chatId = chat.id
     const docs: ChatDoc[] = pending.map((p) => ({
       id: p.id, file: p.file, name: p.file.name, size: p.file.size, status: 'processing', progress: 0, label: 'Starting',
     }))
+    const title = chat.title === 'New chat' ? trimmed.slice(0, 32) || docs[0]?.name || 'New chat' : chat.title
     patchChat(chatId, (c) => ({
       ...c,
-      title: c.title === 'New chat' ? trimmed.slice(0, 32) || docs[0]?.name || 'New chat' : c.title,
+      title,
       messages: [...c.messages, { id: uid(), role: 'user', text: trimmed, docIds: docs.map((d) => d.id) }],
       docs: [...c.docs, ...docs],
     }))
     setInput('')
     setPending([])
     docs.forEach((d) => runOcr(chatId, d)) // local preview only
+    if (docs.length && uploadProjectId) setViewDoc(docs[0].id) // open the panel straight away so progress is visible
+
+    const serverId = await ensureSaved(chat, title, uploadProjectId)
+    if (serverId && trimmed) await postMessage(serverId, 'user', trimmed).catch(() => {}) // before the uploads, to keep the order
 
     if (!docs.length) {
-      say(chatId, 'Question answering is not built yet. Attach a PDF, DOCX or XLSX and I will run the rule checks on it.')
+      sayAndSave(chatId, serverId, 'Question answering is not built yet. Attach a PDF, DOCX or XLSX and I will run the rule checks on it.')
     } else if (!uploadProjectId) {
-      say(chatId, 'Create or select a project first (Projects page, or the project picker below), then attach the document again.')
+      sayAndSave(chatId, serverId, 'Create or select a project first (Projects page, or the project picker below), then attach the document again.')
     } else {
-      docs.forEach((d) => submitToBackend(chatId, uploadProjectId, d))
-      setViewDoc(docs[0].id) // open the panel straight away so progress is visible
+      docs.forEach((d) => submitToBackend(chatId, serverId, uploadProjectId, d))
     }
   }
 

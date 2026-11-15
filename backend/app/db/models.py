@@ -52,6 +52,14 @@ class Document(Base):
     stored_path: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     project: Mapped[Project] = relationship(back_populates="documents")
+
+    @property
+    def size_bytes(self) -> int | None:
+        from pathlib import Path
+
+        p = Path(self.stored_path) if self.stored_path else None
+        return p.stat().st_size if p and p.is_file() else None
+
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 

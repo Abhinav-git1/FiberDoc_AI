@@ -23,8 +23,8 @@ disk now (`backend/data/uploads`), object storage when deployed. Only the storag
 | 7 | `findings` | ✏️ | One result per rule per document, with evidence and traceability | Risk and confidence |
 | 8 | `reviews` | 🆕 (replaces `review_comments`) | Every human decision and comment, with history | Auth |
 | 9 | `audit_events` | ✏️ | Append-only record of important actions | Auth |
-| 10 | `chats` | ✅ 0002 | Chat conversations | Chat storage (table built; API next) |
-| 11 | `chat_messages` | ✅ 0002 | User and assistant messages, linked to uploads | Chat storage (table built; API next) |
+| 10 | `chats` | ✅ 0002 | Chat conversations | Chat storage (built) |
+| 11 | `chat_messages` | ✅ 0002 | User and assistant messages, linked to uploads | Chat storage (built) |
 | 12 | `workflow_runs` | 🆕 | One row per validation run: status, versions, risk score, errors | Risk / 7-node workflow |
 | 13 | `workflow_steps` | 🆕 | One row per graph node per run: latency, tokens, model | Observability |
 | 14 | `reports` | 🆕 | Versioned generated reports | 7-node workflow |

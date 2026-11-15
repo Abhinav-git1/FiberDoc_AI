@@ -100,7 +100,7 @@ def test_rule_trace_records_rule_as_used_and_ranking():
 
 def _finding(**kw):
     base = dict(id="f1", project_id="p1", document=NS(name="plan.pdf"), document_id="d1", title="Burial depth",
-                severity="high", source="rule", rule_id="CON-007", rule=NS(text="Rule text", version="0.2", source_name="Demo"),
+                severity="high", source="rule", rule_id="CON-007", rule=NS(text="Rule text", version="0.2", source_name="Demo", section="Construction"),
                 evidence_page=2, evidence_quote="depth 30 in", explanation="too shallow", decision="pending",
                 comments=[], status=None, evidence=None, source_pages_checked=None, recommended_action=None,
                 needs_human_review=None, retrieval=None)
@@ -121,6 +121,7 @@ def test_api_returns_new_fields_camelcase():
     assert js["evidence"] == {"page": 1, "quote": "a"} and len(js["evidenceList"]) == 2
     assert js["sourcePagesChecked"] == [1, 2, 3] and js["needsHumanReview"] is True
     assert js["recommendedAction"] == "Fix it." and js["status"] == "failed"
+    assert js["ruleSection"] == "Construction"  # groups the result panel by category
 
 
 def test_report_shows_all_evidence_status_pages_rank_and_action():

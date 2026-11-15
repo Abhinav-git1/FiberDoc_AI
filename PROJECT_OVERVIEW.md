@@ -179,7 +179,7 @@ and returns the updated finding.
 
 | View | Component | Shows |
 |---|---|---|
-| 💬 Chat & upload | `ChatView.tsx` | Drag-and-drop or attach documents, then in-browser text extraction |
+| 💬 Chat & upload | `ChatView.tsx`, `ResultPanel.tsx` | Attach documents, upload and check them; saved chats and their results |
 | 🗂 Projects | `DashboardView` (`Views.tsx`) | Projects and finding counts; opening one jumps to Findings |
 | 🔍 Findings | `FindingsView` + `FindingCard.tsx` | Findings, filterable by project, with evidence quote, rule text, explanation |
 | ✅ Review queue | `ReviewQueueView` | `pending` findings with a badge count |
@@ -207,11 +207,12 @@ sequenceDiagram
   F-->>A: replace that finding in state (review-queue badge updates)
 ```
 
-### Chat and upload (current, client-side only)
-1. The user attaches PDFs, images or text files. `isSupported()` filters the types.
-2. `ocr.ts` `extractText()` runs **in the browser**. Text files are read directly. Images go to Tesseract OCR. PDFs use pdf.js to read the text layer page by page. A page with fewer than 20 characters is rendered to a canvas and OCR'd.
-3. A progress bar shows `Reading page i/n` or `OCR page i/n`. The user can open the extracted text in the side panel.
-4. The assistant reply is a **placeholder**. Nothing is sent to the backend yet.
+### Chat and upload
+1. The user attaches PDF, DOCX or XLSX files and picks a project. On its first message the chat is saved (`POST /api/chats`).
+2. Each file is uploaded with the chat's ID (`POST /api/projects/{id}/documents`, `chat_id`). The backend saves an `upload` message and checks the file in the background.
+3. When the workflow ends, the backend saves a `result` (or `error`) message in that chat (`app/services/chat_log.py`). The open tab polls the document status, then shows that saved message. The result panel (`ResultPanel.tsx`) shows progress, details, a status summary and the findings.
+4. For PDFs, a preview is also read **in the browser** (`ocr.ts`: pdf.js text layer, Tesseract OCR for empty pages). It is used only for the "Extracted text" tab and only exists in that session.
+5. Saved chats appear under "Recent chats". Opening one loads its messages and documents (`savedChat.ts`), and a document still being checked is polled until its result is saved.
 
 ---
 
@@ -231,6 +232,7 @@ sequenceDiagram
 | Demo rule catalogue | **Built.** 20 rules in 8 sections (QA, Design, Construction, Permits, Labelling, Safety, As-built, Splicing) in `backend/reference/demo_rule_catalogue.md`, marked NON-AUTHORITATIVE. `seed_rules.py` parses and validates it (severity, document types, regexes, duplicate IDs) and syncs the database on startup: changed text clears the rule's embedding so it is re-embedded, and rules removed from the file are marked `retired`, not deleted. 18 rules are deterministic and only 2 use Gemini. Every rule has a passing and a failing example, which `tests/test_catalogue.py` runs |
 | Finding traceability | **Built.** Each finding stores a check status (passed / failed / missing_evidence / needs_review, as in the blueprint), all evidence quotes (both sides of a consistency check), pages checked, a deterministic recommended action, a needs-human-review flag, and a retrieval trace. The audit event lists every retrieved rule with scores (input for the future Recall@K eval). Findings created before 2026-11-12 have `null` for these fields |
 | Classification | **Known issue.** Keyword hits are counted over the whole text with equal weight, so a construction plan with "Design summary" section headings is classified as `design_summary`, and construction-only rules are skipped |
+| Chat history | **Built.** Tables `chats` / `chat_messages` (Alembic `0002`), `/api/chats` endpoints, upload and result messages written by the backend, saved chats in the sidebar (`backend/tests/test_chats.py`) |
 | Chat Q&A | Not built (the chat says so) |
 | Undeterminable checks | A deterministic check that cannot find its data (e.g. only one of two numbers) now raises a "Could not verify automatically… Manual review needed" finding (`validate` in `graph.py`) |
 | Auth | Not built (`users` table exists, no login; reviewer is hard-coded as "Reviewer") |
@@ -252,6 +254,8 @@ The full spec is in [`docs/blueprint.md`](docs/blueprint.md). Where the build st
 | 12 Eval, guardrails | Pydantic output, deterministic arithmetic, human approval, "insufficient evidence", grounded quotes, timeout/duplicate handling, about 7 eval cases | 10–20 labelled files, Recall@3/@5, finding precision/recall, run logging (run ID, node, latency, tokens, model), cited rule IDs checked against retrieved ones, prompt-injection handling, versioned prompts and models |
 
 ### Suggested next steps
+The up-to-date list, with reasons, is in [TODO.md](TODO.md).
+
 1. Fix document classification (weight the title above section headings).
 2. Recall@3 / Recall@5 on 10–20 labelled cases, plus finding precision and recall. Then fix the retrieval query direction if the numbers show it's needed.
 3. Risk score and confidence reasons (section 7), shown in the report and UI.

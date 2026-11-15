@@ -6,11 +6,15 @@
  *   uploadDocument -> POST /api/projects/{id}/documents   (multipart; processed in the background)
  *   listFindings   -> GET  /api/findings
  *   reviewFinding  -> POST /api/findings/{id}/review
+ *   listChats      -> GET  /api/chats
+ *   createChat     -> POST /api/chats
+ *   getChat        -> GET  /api/chats/{id}         (messages + the documents they refer to)
+ *   postMessage    -> POST /api/chats/{id}/messages
  *
  * The backend returns camelCase JSON that already matches ./types, so no mapping is needed.
  * The base URL comes from VITE_API_URL (see frontend/.env).
  */
-import type { BackendDoc, Decision, Finding, Project } from './types'
+import type { BackendDoc, Decision, Finding, Project, SavedChat, SavedChatSummary, SavedMessage } from './types'
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
@@ -46,9 +50,11 @@ export const createProject = (name: string, location: string) =>
 export const listDocuments = (projectId: string) =>
   request<BackendDoc[]>(`/api/projects/${encodeURIComponent(projectId)}/documents`)
 
-export function uploadDocument(projectId: string, file: File) {
+/** With chatId, the backend saves the upload and (when checking ends) the result message in that chat. */
+export function uploadDocument(projectId: string, file: File, chatId?: string) {
   const form = new FormData()
   form.append('file', file)
+  if (chatId) form.append('chat_id', chatId)
   return request<BackendDoc>(`/api/projects/${encodeURIComponent(projectId)}/documents`, { method: 'POST', body: form })
 }
 
@@ -62,4 +68,18 @@ export const reviewFinding = (id: string, decision: Decision, comment: string) =
   request<Finding>(`/api/findings/${encodeURIComponent(id)}/review`, {
     method: 'POST',
     body: JSON.stringify({ decision, comment }),
+  })
+
+export const listChats = () => request<SavedChatSummary[]>('/api/chats')
+
+export const createChat = (title: string, projectId?: string) =>
+  request<SavedChatSummary>('/api/chats', { method: 'POST', body: JSON.stringify({ title, projectId: projectId || null }) })
+
+export const getChat = (id: string) => request<SavedChat>(`/api/chats/${encodeURIComponent(id)}`)
+
+/** Only 'text' and 'error' messages can be posted; upload and result messages come from the backend. */
+export const postMessage = (chatId: string, role: 'user' | 'assistant', text: string, kind: 'text' | 'error' = 'text') =>
+  request<SavedMessage>(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ role, text, kind }),
   })

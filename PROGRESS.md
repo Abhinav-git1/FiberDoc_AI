@@ -4,7 +4,75 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-15
+
+### Recent chats stay in the sidebar on every page ✅
+**Why:** the first real upload through the UI worked end to end: a 4-page construction plan, classified correctly, with 14 rules checked, a saved result message, and the result panel with categories. During that test the owner noticed that "Recent chats" disappeared on the Projects, Findings and Review queue pages. Saved chats are how you get back to a result, so they should always be one click away.
+
+- `frontend/src/App.tsx`: the chat list is no longer limited to the chat page. Clicking a chat from any page opens it and switches back to the chat view. A chat is highlighted only while the chat view is open, so it doesn't look selected on other pages.
+
+**Status:** TypeScript compiles cleanly. The fix itself hasn't been tried in the browser yet; the owner will.
+
+- **Housekeeping:** `frontend/tsconfig.tsbuildinfo` is no longer tracked (added to `.gitignore`). *Why:* it's a TypeScript build cache that changes on every type-check, which added noise to every commit.
+
+**Next:** classifier fix.
+
 ## 2026-11-14
+
+### Results broken into rule categories; to-do list ✅
+**Why:** the owner asked for the upload result to be broken into categories. The result panel only counted by status and severity, which shows how much is wrong but not where. Rules already have a catalogue section (Construction, Permits, Design, Quality assurance…), which matches how engineering teams divide the work.
+
+- **`ruleSection` on every finding** (`backend/app/schemas.py`, `backend/app/api/findings.py`), read from the rule's `section`. *Why:* taken from the rule record rather than the retrieval trace, so findings created before traces existed are grouped too.
+- **"By category" in the result panel** (`frontend/src/ResultPanel.tsx`):
+  - One row per category, with a bar split by status and an "N open · total" count.
+  - Sorted with the most open issues first.
+  - Clicking a row filters the findings list to that category.
+- **One rule for findings without a status.** Findings from before 2026-11-12 count as *needs review* in the tiles, the category bars and the sort order. *Why:* they were never settled automatically. Before, the tiles skipped them while the sort treated them as needs review, so the counts didn't add up.
+- **`TODO.md`** at the repo root:
+  - The owner's four requests with their status.
+  - The blueprint roadmap, each item with its reason.
+  - A plan for **MCP** (expose FiberDoc as an MCP server first; no approve tool, so decisions stay with humans) and for **n8n** (automation around the app: intake, notifications, reminders, with an outbound webhook needed first).
+
+  *Why:* one place to see what's left and why, next to the log of what's done.
+
+**Status:** 113 tests passing, 4 skipped (`test_traceability.py` now checks `ruleSection`). TypeScript compiles cleanly, with no new lint warnings. Grouping was checked against the live API: the 15 existing findings fall into 4 categories. The panel itself hasn't been viewed with a fresh upload yet (see TODO.md).
+
+**Next:** classifier fix.
+
+### Chats are saved in the database ✅
+**Why:** chats lived only in React state, so a page refresh lost every conversation and its results. The result panel could not be rebuilt either. Also, if the browser was closed while a document was being checked, its result reached no chat at all, because only the open tab was polling for it. The blueprint asks for a full, auditable record of what was checked and what was reported.
+
+- **API** (`backend/app/api/chats.py`):
+  - `GET /api/chats`: the most recently used first.
+  - `POST /api/chats`: create a chat.
+  - `GET /api/chats/{id}`: its messages, plus the documents they refer to.
+  - `POST /api/chats/{id}/messages`: add a message.
+- **The backend writes the messages about uploads** (`backend/app/services/chat_log.py`):
+  - When a file arrives with `chat_id`, an `upload` message.
+  - When the workflow ends, a `result` message (or `error`), written by `record_outcome`. It is also written for documents failed by `fail_interrupted` at startup.
+
+  *Why:* the result is then saved even if no browser is open. Clients can post only `text` and `error` messages (a 422 for anything else), so a client can't fake a check result.
+- **One wording for results.** The summary ("Checked N rules: … failed, … missing evidence …") is now built in Python (`result_text`). The chat shows the saved text, so a live chat and a reopened one say exactly the same thing. The old browser-side text remains only as a fallback when the chat couldn't be saved.
+- **Frontend:**
+  - A chat is saved on its first message, not when "New chat" is clicked. *Why:* no empty chats in the database.
+  - The sidebar lists saved chats at startup, and opening one loads its messages (`frontend/src/savedChat.ts`).
+  - The backend stores one row per file. A user's text plus the files sent with it are merged back into one bubble, as they were sent.
+  - A reopened chat whose document is still being checked polls every 5 s and picks up the result when it's saved.
+  - If saving fails (backend down), the chat still works in that tab, as before.
+- **`sizeBytes` on documents**, read from the stored original, because a reopened chat has no local file to measure. It is `null` for uploads made before originals were stored.
+- **Extracted text tab:** the browser preview exists only in the session the file was uploaded in, and a reopened chat says so.
+- **Tests:** `backend/tests/test_chats.py` (6 tests):
+  - Result wording, without a database.
+  - The full API against a throwaway Postgres schema that is dropped afterwards: create, post, read, reject fake results, and 404s.
+  - An upload with `chat_id` writing its `upload` message.
+  - `record_outcome` waiting while processing and running only once.
+
+  The `fail_interrupted` test now also checks that interrupted documents report back to their chat.
+- **Dev server reload hang: cause found.** On Windows, uvicorn restarts by sending the worker a Ctrl+C event (`CTRL_C_EVENT`), then waits with no time limit. That signal only reaches processes attached to a console. Servers started from a background shell have none, so every reload hung. LangSmith, suspected earlier, was not the cause. `--reload` works in a normal terminal; servers started by an agent should run without it and be restarted after changes.
+
+**Status:** 113 tests passing, 4 skipped. TypeScript compiles cleanly, with no new lint warnings. Chat endpoints were checked against the running server; the test chat was deleted afterwards. A real upload through the UI hasn't been run, to save Gemini quota.
+
+**Next:** classifier fix (roadmap step), then Recall@3/@5.
 
 ### Alembic migrations; chat tables added ✅
 **Why:** until now, `init_db` ran `create_all()`, which only creates missing tables, followed by hand-written `ALTER TABLE ... IF NOT EXISTS` statements, all on every startup. That approach keeps no history, has no undo, and can't safely rename columns, add foreign keys to existing tables or move data. The next schema steps need all three (for example, `review_comments` becomes `reviews`). It would also let the local database and Neon slowly drift apart.
@@ -18,7 +86,7 @@ Newest entries first. Each entry lists what changed, why, and what is next.
   - Fresh database: upgrade, no differences from the models, downgrade to empty, upgrade again.
   - Simulated pre-Alembic database: missing columns restored, an empty rule status filled, recorded as `0001`, chat tables added, no differences from the models, and `init_db` safe to run twice.
 - **Real database:** backed up first with `pg_dump` to `backend/data/backups/` (git-ignored), then migrated. It is at `0002` with no differences from the models; all rows are unchanged (1 project, 5 documents, 63 chunks, 15 findings, 20 rules).
-- **Dev server** now runs with `--reload-dir app`. *Why:* installing Alembic changed files in `.venv`, which uvicorn was watching, and the reload hung. The old `--reload-exclude "data/*"` pattern was also expanded by the shell into file names.
+- **Dev server** now runs with `--reload-dir app`. *Why:* uvicorn was watching `.venv` too, so installing a package triggered a reload. (Why reloads then hung is explained in the chat entry above.) The old `--reload-exclude "data/*"` pattern was also expanded by the shell into file names.
 
 **Status:** 107 tests passing, 4 skipped. The chat tables exist but nothing writes to them yet.
 

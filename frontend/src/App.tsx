@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import ChatView, { newChat } from './ChatView'
 import { DashboardView, FindingsView, ReviewQueueView } from './Views'
-import { createProject, listFindings, listProjects, reviewFinding } from './api'
+import { createProject, listChats, listFindings, listProjects, reviewFinding } from './api'
+import { stubChat } from './savedChat'
 import type { Chat, Decision, Finding, Project } from './types'
 
 type View = 'chat' | 'projects' | 'findings' | 'review'
@@ -29,6 +30,10 @@ export default function App() {
 
   useEffect(() => {
     refresh().then(() => setLoadError('')).catch((e: Error) => setLoadError(e.message))
+    // Saved chats go under the empty new chat; their messages load when one is opened.
+    listChats()
+      .then((saved) => setChats((cs) => [...cs, ...saved.filter((s) => !cs.some((c) => c.serverId === s.id)).map(stubChat)]))
+      .catch(() => {}) // the error banner above already covers an unreachable backend
   }, [])
 
   async function onCreateProject(name: string, location: string) {
@@ -68,18 +73,16 @@ export default function App() {
             <NavBtn v="findings" label="🔍 Findings" />
             <NavBtn v="review" label="✅ Review queue" badge={pendingCount} />
           </nav>
-          {view === 'chat' && (
-            <>
-              <div className="history-label">Recent chats</div>
-              <nav className="history">
-                {chats.map((c) => (
-                  <button key={c.id} className={'history-item' + (c.id === activeId ? ' active' : '')} onClick={() => setActiveId(c.id)}>
-                    {c.title}
-                  </button>
-                ))}
-              </nav>
-            </>
-          )}
+          {/* Shown on every page: picking a chat from Projects/Findings/Review goes back to the chat view. */}
+          <div className="history-label">Recent chats</div>
+          <nav className="history">
+            {chats.map((c) => (
+              <button key={c.id} className={'history-item' + (view === 'chat' && c.id === activeId ? ' active' : '')}
+                onClick={() => { setActiveId(c.id); setView('chat') }}>
+                {c.title}
+              </button>
+            ))}
+          </nav>
           <div className="side-foot">Engineer · Demo workspace</div>
         </aside>
       )}

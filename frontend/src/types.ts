@@ -36,6 +36,8 @@ export interface Finding {
   source: FindingSource
   ruleId: string
   ruleText: string
+  /** Catalogue section of the rule ("Construction", "Permits", ...); null for rules without one. */
+  ruleSection: string | null
   /** Quoted evidence from the document, or null when the required evidence is missing. */
   evidence: Evidence | null
   /** All evidence quotes (a consistency check has two). */
@@ -68,6 +70,33 @@ export interface BackendDoc {
   pageCount: number
   error: string | null
   sha256?: string | null
+  /** Size of the stored original in bytes (null if the file is gone). */
+  sizeBytes?: number | null
+  createdAt?: string | null
+}
+
+/** Saved chats (backend tables chats / chat_messages). */
+export interface SavedChatSummary {
+  id: string
+  title: string
+  projectId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SavedMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  /** upload and result messages are written by the backend. */
+  kind: 'text' | 'upload' | 'result' | 'error'
+  documentId: string | null
+  createdAt: string
+}
+
+export interface SavedChat extends SavedChatSummary {
+  messages: SavedMessage[]
+  documents: BackendDoc[]
 }
 
 /** What the backend did with a document uploaded from the chat (shown in the result panel). */
@@ -84,7 +113,8 @@ export interface ServerResult {
 
 export interface ChatDoc {
   id: string
-  file: File
+  /** Missing for documents of a chat reopened from the server: the file stays on the server. */
+  file?: File
   name: string
   size: number
   status: 'processing' | 'done' | 'error'
@@ -111,4 +141,8 @@ export interface Chat {
   title: string
   messages: ChatMessage[]
   docs: ChatDoc[]
+  /** Set once the chat is saved on the server (on its first message). */
+  serverId?: string
+  /** false = only the title is loaded so far; the messages are fetched when the chat is opened. */
+  loaded?: boolean
 }

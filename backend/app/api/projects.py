@@ -1,14 +1,15 @@
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Chunk, Document, Project
+from app.db.models import Chat, Chunk, Document, Project
 from app.db.session import SessionLocal, get_db
 from app.schemas import DocumentOut, ProjectIn, ProjectOut
 from app.services import audit
+from app.services.chat_log import add_message, record_outcome
 from app.services.document_parser import parse_document, validate_upload
 from app.services.retrieval import embed_document_chunks
 from app.services.storage import sha256_hex, store_original
@@ -57,6 +58,7 @@ def _process(document_id: str, path: Path) -> None:  # path is the stored origin
             doc = db.get(Document, document_id)
             doc.status, doc.error = "error", str(e)[:500]
             db.commit()
+        record_outcome(db, document_id)  # the result/error message for the chat it was uploaded from
 
 
 INTERRUPTED = "Interrupted: the server restarted while this document was being processed. Please re-upload it."
@@ -69,13 +71,20 @@ def fail_interrupted(db: Session) -> int:
     for doc in stuck:
         doc.status, doc.error = "error", INTERRUPTED
     db.commit()
+    for doc in stuck:
+        record_outcome(db, doc.id)
     return len(stuck)
 
 
 @router.post("/projects/{project_id}/documents", response_model=DocumentOut, response_model_by_alias=True, status_code=202)
-async def upload_document(project_id: str, background: BackgroundTasks, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_document(project_id: str, background: BackgroundTasks, file: UploadFile = File(...),
+                          chat_id: str | None = Form(None), db: Session = Depends(get_db)):
+    """`chat_id` (optional): the chat it was sent from. The upload and its result are then saved in that chat."""
     if db.get(Project, project_id) is None:
         raise HTTPException(404, "Project not found")
+    chat = db.get(Chat, chat_id) if chat_id else None
+    if chat_id and chat is None:
+        raise HTTPException(404, "Chat not found")
     data = await file.read()
     name = Path(file.filename or "upload").name
     try:
@@ -91,5 +100,7 @@ async def upload_document(project_id: str, background: BackgroundTasks, file: Up
     doc.stored_path = str(stored)
     db.commit()
     audit.record(db, "user", "document_uploaded", "document", doc.id, filename=name, sha256=digest, duplicate_of=duplicate)
+    if chat is not None:
+        add_message(db, chat, "user", name, "upload", doc.id)
     background.add_task(_process, doc.id, stored)
     return doc

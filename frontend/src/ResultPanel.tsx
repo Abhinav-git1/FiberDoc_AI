@@ -17,7 +17,7 @@ const fmtDuration = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)} s` 
 
 /** Most urgent first: failed, missing evidence, needs review, passed; then by severity. */
 function rank(f: Finding) {
-  const s = f.status ? STATUS_ORDER.indexOf(f.status) : 2
+  const s = STATUS_ORDER.indexOf(statusOf(f))
   return s * 10 + SEVERITIES.indexOf(f.severity)
 }
 
@@ -34,9 +34,12 @@ interface Props {
 export default function ResultPanel({ doc, findings, projects, onReview, onClose, goTo }: Props) {
   const [tab, setTab] = useState<'results' | 'text'>('results')
   const [hidePassed, setHidePassed] = useState(true)
+  const [category, setCategory] = useState<string | null>(null)
   const s = doc.server
   const mine = s?.documentId ? findings.filter((f) => f.documentId === s.documentId).sort((a, b) => rank(a) - rank(b)) : []
-  const shown = hidePassed ? mine.filter((f) => f.status !== 'passed') : mine
+  const categories = byCategory(mine)
+  const inCategory = category ? mine.filter((f) => categoryOf(f) === category) : mine
+  const shown = hidePassed ? inCategory.filter((f) => f.status !== 'passed') : inCategory
   const project = projects.find((p) => p.id === s?.projectId)
   const pending = mine.filter((f) => f.decision === 'pending').length
 
@@ -86,7 +89,7 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
                 <dt>Project</dt><dd>{project?.name ?? '-'}</dd>
                 <dt>Document type</dt><dd>{s.doc ? s.doc.docType.replace(/_/g, ' ') : '-'}</dd>
                 <dt>Pages</dt><dd>{s.doc?.pageCount || '-'}</dd>
-                <dt>Size</dt><dd>{fmtSize(doc.size)}</dd>
+                <dt>Size</dt><dd>{doc.size ? fmtSize(doc.size) : '-'}</dd>
                 <dt>Processing time</dt><dd>{s.finishedAt ? fmtDuration(s.finishedAt - s.startedAt) : '-'}</dd>
                 <dt>SHA-256</dt><dd className="mono" title={s.doc?.sha256 ?? ''}>{s.doc?.sha256 ? `${s.doc.sha256.slice(0, 16)}…` : '-'}</dd>
                 <dt>Document ID</dt><dd className="mono">{s.documentId ?? '-'}</dd>
@@ -100,7 +103,7 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
                   <div className="stat-row">
                     {STATUS_ORDER.map((st) => (
                       <div key={st} className={`stat status-${st}`}>
-                        <span className="stat-num">{mine.filter((f) => f.status === st).length}</span>
+                        <span className="stat-num">{mine.filter((f) => statusOf(f) === st).length}</span>
                         <span className="stat-label">{STATUS_LABEL[st]}</span>
                       </div>
                     ))}
@@ -118,7 +121,29 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
 
                 <section className="panel-section">
                   <div className="panel-section-head">
-                    <h4>Findings</h4>
+                    <h4>By category</h4>
+                    {category && <button className="chip" onClick={() => setCategory(null)}>Show all</button>}
+                  </div>
+                  <div className="cat-list">
+                    {categories.map(({ name, counts, total }) => (
+                      <button key={name} className={'cat-row' + (category === name ? ' active' : '')} aria-pressed={category === name}
+                        title={STATUS_ORDER.map((st) => `${counts[st]} ${STATUS_LABEL[st].toLowerCase()}`).join(', ')}
+                        onClick={() => setCategory(category === name ? null : name)}>
+                        <span className="cat-name">{name}</span>
+                        <span className="cat-bar" aria-hidden>
+                          {STATUS_ORDER.map((st) => counts[st] > 0 && (
+                            <span key={st} className={`seg status-${st}`} style={{ flexGrow: counts[st] }} />
+                          ))}
+                        </span>
+                        <span className="cat-count">{total - counts.passed ? `${total - counts.passed} open` : 'all passed'} · {total}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel-section">
+                  <div className="panel-section-head">
+                    <h4>Findings{category ? ` · ${category}` : ''}</h4>
                     <label className="muted toggle">
                       <input type="checkbox" checked={hidePassed} onChange={(e) => setHidePassed(e.target.checked)} /> Hide passed
                     </label>
@@ -135,6 +160,22 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
       </div>
     </aside>
   )
+}
+
+const categoryOf = (f: Finding) => f.ruleSection ?? 'Other'
+/** Findings from before statuses existed have none; they were never settled automatically, so: needs review. */
+const statusOf = (f: Finding): FindingStatus => f.status ?? 'needs_review'
+
+/** Findings grouped by rule category, most open issues first. */
+function byCategory(fs: Finding[]) {
+  const groups = new Map<string, Record<FindingStatus, number>>()
+  for (const f of fs) {
+    const c = groups.get(categoryOf(f)) ?? { failed: 0, missing_evidence: 0, needs_review: 0, passed: 0 }
+    c[statusOf(f)]++
+    groups.set(categoryOf(f), c)
+  }
+  return [...groups].map(([name, counts]) => ({ name, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => (b.total - b.counts.passed) - (a.total - a.counts.passed) || a.name.localeCompare(b.name))
 }
 
 function PhaseLabel({ doc }: { doc: ChatDoc }) {
@@ -158,6 +199,9 @@ function TextTab({ doc }: { doc: ChatDoc }) {
     )
   }
   if (doc.status === 'error') return <p className="err">Text preview failed: {doc.error}</p>
+  if (!doc.file) {
+    return <p className="muted">The browser text preview is only available in the session the file was uploaded in. The server keeps the original and its extracted text for the checks.</p>
+  }
   return (
     <>
       <p className="muted">

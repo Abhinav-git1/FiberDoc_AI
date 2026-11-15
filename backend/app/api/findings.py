@@ -17,7 +17,7 @@ def to_out(f: Finding) -> FindingOut:
         ev = [EvidenceOut(page=f.evidence_page, quote=f.evidence_quote)] if f.evidence_quote and f.evidence_page else []
     return FindingOut(
         id=f.id, project_id=f.project_id, document_id=f.document_id, doc_name=f.document.name, title=f.title, severity=f.severity,
-        source=f.source, rule_id=f.rule_id, rule_text=f.rule.text,
+        source=f.source, rule_id=f.rule_id, rule_text=f.rule.text, rule_section=f.rule.section,
         evidence=ev[0] if ev else None, evidence_list=ev,
         explanation=f.explanation, status=f.status, source_pages_checked=f.source_pages_checked,
         recommended_action=f.recommended_action, needs_human_review=f.needs_human_review, retrieval=f.retrieval,
