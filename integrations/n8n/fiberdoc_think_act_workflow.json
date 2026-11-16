@@ -1,0 +1,383 @@
+{
+  "name": "FiberDoc: Think -> Act agent, then email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fiberdoc-think-act",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000001",
+      "name": "FiberDoc webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "fiberdoc-think-act"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configuration: context for both agents. Edit the values, keep the shape of the returned object.\nconst payload = $input.first().json.body;\nconst config = {\n  app: 'FiberDoc AI: first-pass review of fiber-optic (outside plant) construction documents',\n  audience: 'the engineer and reviewer responsible for this project',\n  rules_note: 'The rule catalogue is a NON-AUTHORITATIVE DEMO (invented requirements, not official standards).',\n  guardrails: [\n    'Never approve, reject or close a finding: humans decide in the FiberDoc review queue.',\n    'Use only the findings in the payload. Do not invent values, page numbers or requirements.',\n    'If something is unclear, say what a human should check instead of guessing.',\n  ],\n  owner_roles: ['design engineer', 'construction contractor', 'permitting', 'QA / test', 'reviewer'],\n  max_steps: 6,\n};\nconst open = payload.open_findings || [];\nreturn [{ json: { config, payload, has_open_issues: payload.document?.status !== 'error' && open.length > 0 } }];\n"
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.has_open_issues }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000003",
+      "name": "Open issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyse this checked document and plan the follow-up.\nDocument: {{ JSON.stringify($json.payload.document) }}\nProject: {{ JSON.stringify($json.payload.project) }}\nCounts: {{ JSON.stringify($json.payload.counts) }}\nOpen findings: {{ JSON.stringify($json.payload.open_findings) }}\nRank the issues by severity and status (failed before missing evidence before needs review).",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are the THINK step of a two-step agent for FiberDoc AI. You analyse the result of an automated document check and plan what should happen next. You do not write the final answer.\nContext: {{ JSON.stringify($json.config) }}"
+        }
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000004",
+      "name": "Think",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        680,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000005",
+      "name": "Gemini (Think)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        600,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"assessment\": {\n      \"type\": \"string\",\n      \"description\": \"2-3 sentences: overall state of the document\"\n    },\n    \"risk_level\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"low\",\n        \"medium\",\n        \"high\"\n      ]\n    },\n    \"key_issues\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"rule_id\": {\n            \"type\": \"string\"\n          },\n          \"why_it_matters\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"rule_id\",\n          \"why_it_matters\"\n        ]\n      }\n    },\n    \"plan\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      },\n      \"description\": \"how to tackle the issues, in order\"\n    }\n  },\n  \"required\": [\n    \"assessment\",\n    \"risk_level\",\n    \"key_issues\",\n    \"plan\"\n  ]\n}"
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000006",
+      "name": "Think output parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        780,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=THINK step output: {{ JSON.stringify($json.output) }}\nOpen findings: {{ JSON.stringify($('Config').first().json.payload.open_findings) }}\nWrite at most {{ $('Config').first().json.config.max_steps }} next steps. Each step names the rule IDs it addresses and an owner role from the context. Add caveats for anything a human must verify.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are the ACT step of a two-step agent for FiberDoc AI. Turn the THINK step's plan into concrete, ordered next steps for the people named in the context, and a short email introduction.\nContext: {{ JSON.stringify($('Config').first().json.config) }}"
+        }
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000007",
+      "name": "Act",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1040,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000008",
+      "name": "Gemini (Act)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"email_intro\": {\n      \"type\": \"string\",\n      \"description\": \"2-3 plain sentences opening the email\"\n    },\n    \"next_steps\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"order\": {\n            \"type\": \"integer\"\n          },\n          \"action\": {\n            \"type\": \"string\",\n            \"description\": \"one concrete action\"\n          },\n          \"rule_ids\": {\n            \"type\": \"array\",\n            \"items\": {\n              \"type\": \"string\"\n            }\n          },\n          \"owner_role\": {\n            \"type\": \"string\"\n          },\n          \"priority\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"high\",\n              \"medium\",\n              \"low\"\n            ]\n          }\n        },\n        \"required\": [\n          \"order\",\n          \"action\",\n          \"rule_ids\",\n          \"owner_role\",\n          \"priority\"\n        ]\n      }\n    },\n    \"caveats\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"required\": [\n    \"email_intro\",\n    \"next_steps\",\n    \"caveats\"\n  ]\n}"
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000009",
+      "name": "Act output parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the email: FiberDoc's summary, plus the agent's next steps when it ran.\nconst { payload: p } = $('Config').first().json;\nlet think = null, act = null;\ntry { think = $('Think').first().json.output; act = $('Act').first().json.output; } catch (e) { /* no open issues: AI skipped */ }\nconst esc = (s) => String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst c = p.counts || {}, doc = p.document || {};\nconst prefix = p.test ? '[TEST] ' : '';\nconst subject = doc.status === 'error'\n  ? `${prefix}FiberDoc: processing failed for ${doc.name}`\n  : `${prefix}FiberDoc: ${doc.name} checked, ${c.failed || 0} failed, ${(c.total || 0) - (c.passed || 0)} open` + (think ? `, risk ${think.risk_level}` : '');\nconst steps = (act?.next_steps || []).sort((a, b) => a.order - b.order).map((s) =>\n  `<li><b>${esc(s.action)}</b><br><span style=\"color:#666\">${esc(s.owner_role)} · ${esc(s.priority)} priority · ${esc((s.rule_ids || []).join(', '))}</span></li>`).join('');\nconst rows = (p.open_findings || []).map((f) =>\n  `<tr><td>${esc(f.rule_id)}</td><td>${esc(f.title)}</td><td>${esc(f.status).replace('_', ' ')}</td><td>${esc(f.severity)}</td></tr>`).join('');\nconst html = `\n${act ? `<p>${esc(act.email_intro)}</p>` : ''}\n<p>${esc(p.summary)}</p>\n${think ? `<p><b>AI assessment</b> (risk ${esc(think.risk_level)}): ${esc(think.assessment)}</p>` : ''}\n${steps ? `<h3>Suggested next steps</h3><ol>${steps}</ol>` : ''}\n${(act?.caveats || []).length ? `<p><b>Check before acting:</b></p><ul>${act.caveats.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}\n${rows ? `<h3>Open findings</h3><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px\"><tr><th>Rule</th><th>Finding</th><th>Status</th><th>Severity</th></tr>${rows}</table>` : '<p>No open issues.</p>'}\n<p><a href=\"${esc(p.links?.app)}\">Open FiberDoc AI</a> to review. The next steps are AI suggestions; findings must be confirmed by a human reviewer and nothing is approved automatically.</p>\n<p style=\"color:#888;font-size:12px\">Demo rule catalogue: invented example requirements, not official standards.</p>`;\nreturn [{ json: { to: p.recipient, subject, html } }];\n"
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000010",
+      "name": "Build email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "you@gmail.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000011",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Configuration\nContext for both agents: what FiberDoc is, who the email is for, and the guardrails. Edit the values in **Config**, but keep the shape of the returned object.",
+        "height": 220,
+        "width": 300,
+        "color": 5
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000100",
+      "name": "Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Think\nAnalyses the findings and plans the follow-up. The **output parser** forces JSON: assessment, risk_level, key_issues, plan.",
+        "height": 180,
+        "width": 300,
+        "color": 4
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000101",
+      "name": "Note 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        600,
+        -330
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Act\nTurns the plan into ordered next steps (action, rule IDs, owner role, priority), an email intro and caveats. It never approves findings: humans decide in FiberDoc.",
+        "height": 210,
+        "width": 300,
+        "color": 3
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000102",
+      "name": "Note 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Skipped when\nno open issues, or the document failed to process: the email is sent without AI steps. Each AI run uses 2 Gemini requests.",
+        "height": 180,
+        "width": 300,
+        "color": 6
+      },
+      "id": "7d1c0a3e-0000-4000-8000-000000000103",
+      "name": "Note 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "FiberDoc webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Open issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open issues?": {
+      "main": [
+        [
+          {
+            "node": "Think",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think": {
+      "main": [
+        [
+          {
+            "node": "Act",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Act": {
+      "main": [
+        [
+          {
+            "node": "Build email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build email": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (Think)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Think",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think output parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Think",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (Act)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Act",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Act output parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Act",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

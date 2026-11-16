@@ -32,6 +32,7 @@ The database URL comes from `DATABASE_URL` in `backend/.env`. No URL or password
 |---|---|
 | `0001` | Baseline: the 8 tables that existed before Alembic (users, projects, documents, chunks, rules, findings, review_comments, audit_events) |
 | `0002` | Chat storage: `chats`, `chat_messages` |
+| `0003` | Automations: `automation_settings` (one row), `webhook_deliveries` (with indexes on `document_id` and `created_at`) |
 
 A database created before Alembic is not rebuilt. On its first startup, `init_db` adds any columns it is missing
 (the same statements that used to run at every startup), records it as `0001`, and then applies `0002` onwards.

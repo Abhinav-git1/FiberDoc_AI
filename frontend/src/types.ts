@@ -167,3 +167,26 @@ export interface Timings {
   steps: { name: string; seconds: number }[]
   llmCalls: LlmCall[]
 }
+
+/** Outbound webhook settings (Automations page): a summary of each checked document goes to n8n, which emails it. */
+export interface AutomationSettings {
+  enabled: boolean
+  webhookUrl: string | null
+  recipientEmail: string | null
+  /** Sent as the X-FiberDoc-Token header; n8n's Header Auth checks it. */
+  secret: string
+  updatedAt: string
+}
+
+export interface Delivery {
+  id: string
+  documentId: string | null
+  documentName: string | null
+  event: 'document.checked' | 'test'
+  url: string
+  status: 'sent' | 'failed'
+  httpStatus: number | null
+  attempts: number
+  error: string | null
+  createdAt: string
+}

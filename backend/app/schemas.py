@@ -99,6 +99,33 @@ class TimingsOut(CamelModel):
     llm_calls: list[LlmCallOut]
 
 
+class AutomationSettingsOut(CamelModel):
+    enabled: bool
+    webhook_url: str | None
+    recipient_email: str | None
+    secret: str  # shown so it can be pasted into n8n's Header Auth credential (local, single-user app)
+    updated_at: datetime
+
+
+class AutomationSettingsIn(CamelModel):
+    enabled: bool
+    webhook_url: str | None = None
+    recipient_email: str | None = None
+
+
+class DeliveryOut(CamelModel):
+    id: str
+    document_id: str | None
+    document_name: str | None = None
+    event: str
+    url: str
+    status: str  # sent | failed
+    http_status: int | None
+    attempts: int
+    error: str | None
+    created_at: datetime
+
+
 class ChatIn(CamelModel):
     title: str = "New chat"
     project_id: str | None = None

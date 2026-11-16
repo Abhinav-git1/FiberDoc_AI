@@ -4,6 +4,68 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-16
+
+### README rewritten: technologies and techniques ✅
+**Why:** the root `README.md` was empty, and it is the first page anyone sees on GitHub. The owner asked for it to describe every technology and technique used so far.
+
+- **New `README.md`:** what the app does, an architecture diagram, and the tech stack grouped into backend, data, frontend, automation and tooling. It then describes 13 techniques: deterministic-first checks, hybrid retrieval, grounded structured LLM output, the LangGraph state graph, human-in-the-loop with audit, the rule catalogue as data, resilience, observability and timing, safe migrations, signed outbound webhooks, the n8n Think → Act agent, API and frontend patterns, and evaluation.
+- It also covers where the data goes, the project layout, how to run it, the test suites and the status and roadmap. It links to the detailed docs.
+- **Other docs brought up to date:**
+  - `backend/README.md`: it no longer mentions Docker Compose or mock functions, and it lists every router and service.
+  - `backend/migrations/README.md`: adds the `0003` row.
+  - `PROJECT_OVERVIEW.md`: adds Alembic, httpx, the timing recorder and n8n to the stack; adds n8n to the diagram; adds the chats and automations data rows, processing step 6 and all the endpoints; changes four views to five; updates the test counts.
+- **Honest status:** it says that the n8n workflows haven't been run in a real n8n yet, that the last eval run is out of date, and that the classifier and speed are known issues.
+
+### Think → Act agent workflow in n8n ✅ (not yet run in n8n)
+**Why:** the owner wanted a workflow like n8n's "Think → Act" agent template: one agent plans, a second carries out the plan, and each is forced into JSON by an output parser. The goal is to turn a list of findings into suggested next steps in the email. It lives in **n8n**, not in FiberDoc, by the owner's choice. *Why that fits:* the steps are a suggestion for people, not part of the auditable check, so they don't need the backend's tests and traces, and the agent's prompts can be changed in n8n without a code change.
+
+- **`integrations/n8n/fiberdoc_think_act_workflow.json`:**
+  - The chain: Webhook (Header Auth) → **Config** (context and guardrails) → **Open issues?** → **Think** (Gemini + structured output parser: assessment, risk level, key issues, plan) → **Act** (Gemini + parser: ordered next steps with rule IDs, owner role and priority, plus an email intro and caveats) → Build email → Send email.
+  - Sticky notes explain each part, as in the template.
+  - Generated from a script, so the long prompts and code don't need hand-escaping.
+- **Guardrails** in the agents' context: never approve or close findings, use only the findings given, don't invent values, and name what a human should check. The email labels the steps as AI suggestions.
+- **The AI is skipped** when nothing is open or the document failed. *Why:* there's nothing to plan, and each run costs 2 Gemini requests on a free tier of about 20 a day.
+- **Gemini instead of the template's OpenRouter.** *Why:* the project already has a Gemini key, and one provider is easier to reason about for where data goes.
+- **The Automations page's data-flow diagram** gained a step: with this workflow, the summary (never the document text) goes from n8n to Gemini.
+- **The guide** (`integrations/n8n/README.md`) gained a section covering the Gemini credential, the separate webhook path `fiberdoc-think-act` and troubleshooting.
+
+**Status:** the JSON is valid, and the 15 nodes are all connected. Both schemas are valid JSON Schema. Both Code nodes were run in Node.js against FiberDoc's real test message, with and without agent output: the steps sort by `order`, and the email without AI works. **Not yet imported or run in n8n:** the AI node settings (agent, Gemini model, output parser) can only be confirmed there.
+
+**Next:** import it into n8n and run **Send test**. That's 2 Gemini requests.
+
+### Email after each upload, through n8n ✅
+**Why:** the owner asked for the result of each upload to arrive by email, set up through n8n, with a sidebar tab that shows where the data goes. Email comes from n8n rather than from FiberDoc itself because n8n can then send it anywhere (email now; Slack, Teams, Jira or reminders later) by adding nodes, with no new code in FiberDoc. The checking logic stays in LangGraph, which is tested and traced. The only thing FiberDoc needs is one well-defined outbound event.
+
+- **Outbound webhook** (`backend/app/services/notify.py`). When a document's workflow ends (checked or failed), `_process` calls `notify_document_checked`, right after the chat result message.
+  - **What is sent:** a summary: name, type, status, project, counts, the open findings with explanations shortened to 300 characters, and a link to the app. *Why:* the document text has no reason to leave the machine for an email. Gemini already sees it, n8n doesn't need to.
+  - **Headers:** `X-FiberDoc-Token` (the shared secret) and `X-FiberDoc-Signature` (HMAC-SHA256 of the body). *Why both:* n8n's Webhook node can check a header token with no code, while the signature serves receivers that verify bodies properly.
+  - **Retries:** 3 attempts on connection errors, 5xx and 429, but not on other 4xx. *Why:* a wrong URL or token won't fix itself, so retrying only delays the error.
+  - **It never raises.** *Why:* a broken webhook must not change a document's result.
+- **Tables** `automation_settings` (one row) and `webhook_deliveries` (Alembic `0003`). *Why a delivery log:* "did the email go?" should be answerable from the app. The log stores exactly what was sent. The real DB was backed up first (`backend/data/backups/fiberdoc_pre_0003_2026-11-16.dump`). The migration was applied, `alembic check` is clean, and a downgrade then upgrade round trip was tested.
+- **API** (`backend/app/api/automations.py`):
+  - `GET`/`PUT /api/automations/settings`, which validates the URL and email and refuses "on" without a URL.
+  - `POST /api/automations/settings/secret` creates a new token.
+  - `POST /api/automations/test` sends a labelled sample, even while switched off.
+  - `GET /api/automations/deliveries`.
+  - Settings changes go to the audit log.
+- **⚡ Automations tab**, below Projects (`frontend/src/AutomationsView.tsx`):
+  - A "Where the data goes" diagram that marks each point where data leaves the computer (Gemini, n8n, the mail server).
+  - The settings form, with the token (show / copy / new).
+  - **Send test**, and the delivery log, which refreshes every 10 s.
+- **n8n workflow** `integrations/n8n/fiberdoc_email_workflow.json`: Webhook (Header Auth) → Build email (Code: subject plus an HTML table of open findings) → Send email (SMTP). It comes with a step-by-step guide covering Gmail App Password, import, credentials and troubleshooting (`integrations/n8n/README.md`). The Code node was run against a real FiberDoc test message to check its output.
+- **Tidy-up:** the sidebar `NavBtn` moved out of `App`, because a component defined inside another is re-created on every render. Lint warnings dropped from 9 to 5.
+- **Tests:** `backend/tests/test_notify.py` (5 tests):
+  - Settings defaults and validation.
+  - The token and signature headers on a test send.
+  - Retries: a connection error and a 503 succeed on attempt 3; a 404 isn't retried.
+  - The real-event payload: counts, failed first, explanation shortened, no document text, and the on/off switch.
+  - A broken webhook never raises.
+
+**Status:** 123 tests passing, 4 skipped. TypeScript compiles cleanly. The endpoints were checked against the running server. **Not yet run end to end with a real n8n and inbox**: that needs the owner's Gmail App Password (guide step 2).
+
+**Next:** the owner runs the setup guide; then the speed fix (Gemini time budget and fallback model).
+
 ## 2026-11-15
 
 ### Timing breakdown for every document ✅

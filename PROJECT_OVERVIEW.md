@@ -25,7 +25,10 @@ reviewer** then approves or rejects each finding.
 | **Deterministic validators** (plain Python + regex) | Required terms, numeric minimums, cross-section consistency, quote-grounding | Exact, explainable, no hallucination | `app/services/validators.py` | During `validate_evidence` |
 | **Hybrid retrieval** | Picks which rules apply and which chunks are evidence | Combines metadata filter, vector similarity and keyword match | `app/services/retrieval.py` | During `retrieve_rules` and `validate_evidence` |
 | **LangSmith** (optional) | Traces LangGraph and Gemini question-and-answer calls (not embeddings) | Debugging and evaluation | `.env`: `LANGSMITH_*` | When `LANGSMITH_TRACING=true` |
-| **pytest** | Tests for validators and parser | Guards the deterministic logic | `backend/tests/` | On demand |
+| **Alembic** | Versioned schema migrations (`0001`–`0003`) | Safe, reversible schema changes on a database with real data | `backend/migrations/` | At startup (`init_db`), and by hand when changing the schema |
+| **httpx** | Outbound webhook to n8n (token + HMAC signature, retries) | Simple sync client with timeouts | `app/services/notify.py` | When a document finishes, if automations are on |
+| **Timing recorder** (`ContextVar`) | Time per workflow step and per Gemini call (attempts, errors, tokens) | Find where processing time goes before optimising | `app/services/timing.py` | Every processing run |
+| **pytest** | Unit, integration, offline-eval and gated live-eval tests (123 passed, 4 skipped) | Guards the deterministic logic and the integrations | `backend/tests/` | On demand |
 
 ### Frontend (`frontend/`)
 
@@ -37,6 +40,13 @@ reviewer** then approves or rejects each finding.
 | **pdfjs-dist** | Reads PDF text layers in the browser | Instant preview text without the server | `src/ocr.ts` | When a file is attached in chat |
 | **Tesseract.js** | Browser OCR for scanned PDFs and images | Works offline; the interim extractor until the backend handles uploads | `src/ocr.ts` | When a page has no text layer, or the file is an image |
 | **oxlint** | Linting | Fast | `.oxlintrc.json` | `npm run lint` |
+
+### Automation (`integrations/n8n/`)
+
+| Tech | What it does here | Why | Where | When |
+|---|---|---|---|---|
+| **n8n** (self-hosted, `npx n8n`) | Receives FiberDoc's webhook and sends the summary email over SMTP | Notifications and later Slack/Jira steps without new FiberDoc code | `fiberdoc_email_workflow.json` | After each checked document |
+| **n8n AI Agent + Gemini + Structured Output Parser** | Optional Think → Act agent that writes ordered next steps for the email | Two-step plan-then-act pattern with forced JSON output; suggestions only | `fiberdoc_think_act_workflow.json` | Only when a document has open findings |
 
 ### Config and secrets
 
@@ -62,6 +72,7 @@ flowchart LR
   subgraph Server["FastAPI (localhost:8000)"]
     R1[api/projects.py]
     R2[api/findings.py]
+    R3[api/chats.py · reports.py · automations.py]
     BG[Background task _process]
     WF[LangGraph workflow]
     SVC[services: parser · validators · retrieval · llm · audit]
@@ -78,6 +89,8 @@ flowchart LR
   SVC <--> DB
   SVC -- "embed / generate" --> GEM
   WF -.traces.-> LS
+  N8N[[n8n<br/>email workflow]]
+  BG -- "webhook: summary only" --> N8N
 ```
 
 ---
@@ -93,11 +106,14 @@ flowchart LR
 | Rules + embeddings | `seed_rules` (also auto-seeded at server start; embeddings need the Gemini key) | `rules` | retrieval and validation |
 | Findings (always created `pending`), with `status`, `evidence[]`, `source_pages_checked`, `recommended_action`, `needs_human_review` and a `retrieval` trace (rule as used, rank and scores, evidence chunks shown to the LLM) | workflow node `human_review` | `findings` | `GET /api/findings`, finding card, HTML report |
 | Review decision + comments | `POST /api/findings/{id}/review` | `findings.decision`, `review_comments` | the frontend |
-| Audit trail (`workflow_completed` also holds every retrieved rule with its rank and scores) | every key action | `audit_events` | (not exposed in the UI yet) |
+| Audit trail (`workflow_completed` also holds every retrieved rule with its rank and scores; `processing_timed` holds the timing breakdown) | every key action | `audit_events` | timings via `GET /api/documents/{id}/timings`; the rest not in the UI yet |
+| Chats and their messages | `POST /api/chats`, the upload endpoint, `record_outcome` | `chats`, `chat_messages` | the sidebar's Recent chats |
+| Webhook settings + delivery log | ⚡ Automations page, `notify_document_checked` | `automation_settings`, `webhook_deliveries` | the ⚡ Automations page |
 
 **What leaves your machine:** chunk text and rule text are sent to **Google Gemini** for embeddings. For semantic
 rules and classification, excerpts are also sent to Gemini for structured answers. If LangSmith tracing is on, run
-traces go to LangSmith too.
+traces go to LangSmith too. If automations are on, a **summary** (never the document text) goes to your n8n
+workflow, and with the Think → Act workflow n8n sends that summary to Gemini.
 
 **Document status lifecycle:** `processing` → `awaiting_review` (or `error`, with the message saved in `documents.error`).
 
@@ -118,6 +134,8 @@ traces go to LangSmith too.
 3. **Embed** every chunk with Gemini (`embed_document_chunks`, batches of 50).
 4. **Run the LangGraph workflow.**
 5. On any exception, set `status="error"` and save the message. The stored original is kept either way.
+6. Save the timing breakdown (`processing_timed` audit event), write the result message into the chat, then send the
+   webhook if automations are on (it never raises).
 
 ### Step C: The LangGraph pipeline (`workflow/graph.py`)
 
@@ -169,18 +187,28 @@ and returns the updated finding.
 | POST | `/api/projects/{id}/documents` | Upload a file (returns 202) |
 | GET | `/api/findings?project_id=` | List findings (optional filter) |
 | POST | `/api/findings/{id}/review` | Record a human decision |
+| GET | `/api/documents/{id}/timings` | Timing breakdown of the latest processing run |
+| GET | `/api/projects/{id}/report` | Downloadable HTML report |
+| GET / POST | `/api/chats` | List saved chats, create one |
+| GET | `/api/chats/{id}` | A chat with its messages and documents |
+| POST | `/api/chats/{id}/messages` | Add a message |
+| GET / PUT | `/api/automations/settings` | Webhook URL, recipient, on/off |
+| POST | `/api/automations/settings/secret` | Create a new shared token |
+| POST | `/api/automations/test` | Send a labelled test event |
+| GET | `/api/automations/deliveries` | Delivery log |
 
 ---
 
 ## 5. Frontend workflow
 
 ### Structure (`src/App.tsx`)
-`App` holds the state: `projects`, `findings`, chats and the current view. The sidebar switches between four views.
+`App` holds the state: `projects`, `findings`, chats and the current view. The sidebar switches between five views, with Recent chats always listed below them.
 
 | View | Component | Shows |
 |---|---|---|
 | 💬 Chat & upload | `ChatView.tsx`, `ResultPanel.tsx` | Attach documents, upload and check them; saved chats and their results |
 | 🗂 Projects | `DashboardView` (`Views.tsx`) | Projects and finding counts; opening one jumps to Findings |
+| ⚡ Automations | `AutomationsView.tsx` | Where the data goes, webhook settings and token, Send test, delivery log |
 | 🔍 Findings | `FindingsView` + `FindingCard.tsx` | Findings, filterable by project, with evidence quote, rule text, explanation |
 | ✅ Review queue | `ReviewQueueView` | `pending` findings with a badge count |
 
@@ -226,16 +254,18 @@ sequenceDiagram
 | UI to **create a project** | Built (Projects page) |
 | **Downloadable report** (`GET /api/projects/{id}/report`) | **Built.** Self-contained HTML with summary, documents, findings, evidence, decisions and comments; "Download report" button on the Findings page (project selected) |
 | `GEMINI_API_KEY` | Set in `backend/.env`. Models in use: `gemini-embedding-001` (768-dim) and `gemini-3.8-flash`. Gemini calls retry transient 503/429 errors |
-| Evaluation set | Offline: `backend/tests/test_eval_rules.py` runs the deterministic rules on the defective sample PDF (S4), a compliant one (S5) and an undeterminable case. Live: `backend/tests/test_eval_semantic.py` checks PRM-002 / LBL-001 against S4-S7 using real Gemini calls; skipped unless `RUN_LIVE_EVAL=1`, and skips when Gemini is unavailable. **Live cases have not yet passed**: the free-tier daily quota (20 requests/day on `gemini-3.8-flash`) ran out on 2026-11-09. Generators: `sample_docs/make_sample.py`, `make_variants.py`. 24 offline tests pass |
+| Evaluation set | Offline: `backend/tests/test_eval_rules.py` runs the deterministic rules on the defective sample PDF (S4), a compliant one (S5) and an undeterminable case. Live: `backend/tests/test_eval_semantic.py` checks PRM-002 / LBL-001 against S4-S7 using real Gemini calls; skipped unless `RUN_LIVE_EVAL=1`, and skips when Gemini is unavailable. **Live cases have not yet passed**: the free-tier daily quota (20 requests/day on `gemini-3.8-flash`) ran out on 2026-11-09. Generators: `sample_docs/make_sample.py`, `make_variants.py`. End-to-end harness: `python -m evals.run_eval` (last run 2026-11-09, before the 20-rule catalogue, so out of date). Whole suite: 123 passed, 4 skipped (2026-11-16) |
 | Checksum + original storage | **Built.** `documents.sha256` / `stored_path`, `app/services/storage.py`, `tests/test_storage.py`. Schema changes are Alembic migrations (`backend/migrations/`), applied at startup. Stored files are not yet served back or deleted with their project |
 | Rule catalogue metadata | **Built.** Each rule has `source_name`, `section`, `jurisdiction`, `standard_family`, `version`, `effective_date`, `status` (placeholder values `DEMO-REGION-A` / `DEMO-STD-1` / `0.2`). `retrieve_rules` filters on `status='approved'` and optional jurisdiction / standard family BEFORE ranking. The catalogue is labelled **non-authoritative** in the report, in the UI banner and in `seed_rules.py` |
 | Demo rule catalogue | **Built.** 20 rules in 8 sections (QA, Design, Construction, Permits, Labelling, Safety, As-built, Splicing) in `backend/reference/demo_rule_catalogue.md`, marked NON-AUTHORITATIVE. `seed_rules.py` parses and validates it (severity, document types, regexes, duplicate IDs) and syncs the database on startup: changed text clears the rule's embedding so it is re-embedded, and rules removed from the file are marked `retired`, not deleted. 18 rules are deterministic and only 2 use Gemini. Every rule has a passing and a failing example, which `tests/test_catalogue.py` runs |
 | Finding traceability | **Built.** Each finding stores a check status (passed / failed / missing_evidence / needs_review, as in the blueprint), all evidence quotes (both sides of a consistency check), pages checked, a deterministic recommended action, a needs-human-review flag, and a retrieval trace. The audit event lists every retrieved rule with scores (input for the future Recall@K eval). Findings created before 2026-11-12 have `null` for these fields |
 | Classification | **Known issue.** Keyword hits are counted over the whole text with equal weight, so a construction plan with "Design summary" section headings is classified as `design_summary`, and construction-only rules are skipped |
 | Chat history | **Built.** Tables `chats` / `chat_messages` (Alembic `0002`), `/api/chats` endpoints, upload and result messages written by the backend, saved chats in the sidebar (`backend/tests/test_chats.py`) |
+| Automations (n8n email) | **Built.** ⚡ Automations page; outbound webhook with a token and signature, retries and a delivery log (tables `automation_settings` / `webhook_deliveries`, Alembic `0003`); importable n8n workflow and guide in `integrations/n8n/` (`backend/tests/test_notify.py`) |
 | Chat Q&A | Not built (the chat says so) |
 | Undeterminable checks | A deterministic check that cannot find its data (e.g. only one of two numbers) now raises a "Could not verify automatically… Manual review needed" finding (`validate` in `graph.py`) |
 | Auth | Not built (`users` table exists, no login; reviewer is hard-coded as "Reviewer") |
+| Processing timings | **Built.** Per-step and per-Gemini-call times in the result panel ("Where the time went"). It showed most of a slow run was Gemini 503/504 retries; the speed fix is not built yet |
 | Not built yet | PostGIS/GeoJSON, LangSmith eval dataset, Cloud Run deployment, React/Playwright tests |
 
 ### Target design: the blueprint (not fully built)
@@ -278,7 +308,8 @@ The up-to-date list, with reasons, is in [TODO.md](TODO.md).
 # Backend (from backend/)
 .venv\Scripts\activate
 python -m app.workflow.seed_rules      # needs GEMINI_API_KEY
-uvicorn app.main:app --reload --reload-dir app   # http://localhost:8000/docs; migrations run at startup
+uvicorn app.main:app --port 8000      # http://localhost:8000/docs; migrations run at startup
+                                       # (--reload works in a normal terminal; it can hang in a background shell on Windows)
 
 # Frontend (from frontend/)
 npm install

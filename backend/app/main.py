@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chats, findings, projects, reports
+from app.api import automations, chats, findings, projects, reports
 from app.config import get_settings
 from app.db.session import SessionLocal, init_db
 
@@ -31,6 +31,7 @@ app.include_router(projects.router)
 app.include_router(findings.router)
 app.include_router(reports.router)
 app.include_router(chats.router)
+app.include_router(automations.router)
 
 
 @app.get("/health")

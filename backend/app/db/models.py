@@ -1,4 +1,4 @@
-"""Users · Projects · Documents · Chunks · Rules · Findings · Reviews · Audit events · Chats.
+"""Users · Projects · Documents · Chunks · Rules · Findings · Reviews · Audit events · Chats · Automations.
 
 Changing a table? Add an Alembic migration too (see migrations/README.md)."""
 import uuid
@@ -173,3 +173,33 @@ class ChatMessage(Base):
     kind: Mapped[str] = mapped_column(String, default="text")  # text | upload | result | error
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class AutomationSettings(Base):
+    """Outbound webhook settings (one row, id "default"). When a document has been checked, FiberDoc POSTs a summary
+    to `webhook_url`, for example an n8n workflow that emails it to `recipient_email`."""
+    __tablename__ = "automation_settings"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default="default")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    webhook_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    recipient_email: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Sent as the X-FiberDoc-Token header and used to sign the body (X-FiberDoc-Signature), so the receiver can
+    # reject requests that did not come from FiberDoc.
+    secret: Mapped[str] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class WebhookDelivery(Base):
+    """One attempt to deliver an event to the webhook (after its retries): what was sent and what came back."""
+    __tablename__ = "webhook_deliveries"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    # null for test events; kept (minus the link) if the document is deleted
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
+    event: Mapped[str] = mapped_column(String)  # document.checked | test
+    url: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)  # sent | failed
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)

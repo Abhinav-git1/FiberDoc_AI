@@ -12,7 +12,7 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 | 1 | Show the result of an uploaded document in the UI, broken into categories, with a button to open it from the chat | ✅ | Result panel (`frontend/src/ResultPanel.tsx`), opened by **View details →**. Shows counts by status, severity and **rule category** (Construction, Permits, Design…). Click a category to filter the findings |
 | 2 | Schema for the data: where to store it, how many tables | ✅ | [docs/schema.md](docs/schema.md): one Postgres + pgvector database, 14 tables (8 existing, 6 new) plus `geo_features` later. Alembic migrations in `backend/migrations/`; chat tables built (`0002`). The other new tables come with the roadmap steps that use them |
 | 3 | MCP server: connect external tools to the app | ⬜ | See [MCP](#mcp-model-context-protocol) below |
-| 4 | n8n: automate the workflow around the app | ⬜ | See [n8n](#n8n-workflow-automation) below |
+| 4 | n8n: automate the workflow around the app | 🟡 | **Email after each upload is built:** outbound webhook, ⚡ Automations page, and an importable n8n workflow ([integrations/n8n/](integrations/n8n/README.md)). Not yet run against a real n8n and inbox. Intake and reminders are still to do. See [n8n](#n8n-workflow-automation) below |
 
 ## Roadmap (blueprint)
 
@@ -66,8 +66,9 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 2. **Notify:** when checking finishes, FiberDoc calls an n8n webhook → n8n posts the summary to Slack/Teams or email, and opens a Jira ticket for each **failed** high-severity finding.
 3. **Reminders:** each day, findings still pending review → a reminder to the reviewer.
 
-**What FiberDoc needs first:**
-- An **outbound webhook** when the workflow ends: a URL in settings, a signed payload with the document, its status counts and a findings link, and retries. This is where `record_outcome` runs today.
-- **API-key auth** for n8n's calls (roadmap item 5).
-
-**Done when:** a sample n8n workflow (exported JSON in `integrations/n8n/`) takes a file dropped into a folder through to a Slack/email summary, and the webhook has tests.
+**Status:**
+- ✅ **Outbound webhook** (2026-11-16): the settings and the delivery log are on the ⚡ Automations page; the payload is signed and delivery is retried. The n8n email workflow is in `integrations/n8n/`, with its setup guide.
+- ⬜ First real run: n8n started, Gmail App Password created, test email received.
+- 🟡 **Think → Act agent** (`integrations/n8n/fiberdoc_think_act_workflow.json`): two Gemini agents write suggested next steps for the email. Built and checked offline; not yet imported or run in n8n.
+- ⬜ **Intake** (n8n → `POST /api/projects/{id}/documents`) needs **API-key auth** on FiberDoc first (roadmap item 5). Until then, n8n could upload to an open local API, so it isn't built.
+- ⬜ Reminders and Jira/Slack: extra nodes in n8n, using the same webhook.

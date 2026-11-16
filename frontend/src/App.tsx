@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
+import AutomationsView from './AutomationsView'
 import ChatView, { newChat } from './ChatView'
 import { DashboardView, FindingsView, ReviewQueueView } from './Views'
 import { createProject, listChats, listFindings, listProjects, reviewFinding } from './api'
 import { stubChat } from './savedChat'
 import type { Chat, Decision, Finding, Project } from './types'
 
-type View = 'chat' | 'projects' | 'findings' | 'review'
+type View = 'chat' | 'projects' | 'automations' | 'findings' | 'review'
+
+function NavBtn({ v, label, badge, view, setView }: { v: View; label: string; badge?: number; view: View; setView: (v: View) => void }) {
+  return (
+    <button className={'nav-item' + (view === v ? ' active' : '')} onClick={() => setView(v)}>
+      {label}{!!badge && <span className="count">{badge}</span>}
+    </button>
+  )
+}
 
 export default function App() {
   const [view, setView] = useState<View>('chat')
@@ -55,11 +64,6 @@ export default function App() {
   }
 
   const pendingCount = findings.filter((f) => f.decision === 'pending').length
-  const NavBtn = ({ v, label, badge }: { v: View; label: string; badge?: number }) => (
-    <button className={'nav-item' + (view === v ? ' active' : '')} onClick={() => setView(v)}>
-      {label}{!!badge && <span className="count">{badge}</span>}
-    </button>
-  )
 
   return (
     <div className="app">
@@ -68,10 +72,11 @@ export default function App() {
           <div className="brand"><span className="logo">◎</span> FiberDoc AI</div>
           <button className="new-chat" onClick={startNewChat}>＋ New chat</button>
           <nav className="nav">
-            <NavBtn v="chat" label="💬 Chat & upload" />
-            <NavBtn v="projects" label="🗂 Projects" />
-            <NavBtn v="findings" label="🔍 Findings" />
-            <NavBtn v="review" label="✅ Review queue" badge={pendingCount} />
+            <NavBtn v="chat" label="💬 Chat & upload" view={view} setView={setView} />
+            <NavBtn v="projects" label="🗂 Projects" view={view} setView={setView} />
+            <NavBtn v="automations" label="⚡ Automations" view={view} setView={setView} />
+            <NavBtn v="findings" label="🔍 Findings" view={view} setView={setView} />
+            <NavBtn v="review" label="✅ Review queue" badge={pendingCount} view={view} setView={setView} />
           </nav>
           {/* Shown on every page: picking a chat from Projects/Findings/Review goes back to the chat view. */}
           <div className="history-label">Recent chats</div>
@@ -91,7 +96,7 @@ export default function App() {
         <header className="topbar">
           <button className="icon-btn" title="Toggle sidebar" onClick={() => setSideOpen((s) => !s)}>☰</button>
           <span className="topbar-title">
-            {{ chat: chats.find((c) => c.id === activeId)?.title, projects: 'Projects', findings: 'Findings', review: 'Review queue' }[view]}
+            {{ chat: chats.find((c) => c.id === activeId)?.title, projects: 'Projects', automations: 'Automations', findings: 'Findings', review: 'Review queue' }[view]}
           </span>
         </header>
 
@@ -109,6 +114,9 @@ export default function App() {
             <DashboardView projects={projects} findings={findings} onCreateProject={onCreateProject}
               onOpenProject={(id) => { setProjectId(id); setView('findings') }} />
           </div>
+        )}
+        {view === 'automations' && (
+          <div className="view"><AutomationsView /></div>
         )}
         {view === 'findings' && (
           <div className="view">

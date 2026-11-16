@@ -1,0 +1,51 @@
+{
+  "name": "FiberDoc: email the result of each checked document",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fiberdoc-checked",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b1f0c8e2-1a2b-4c3d-8e9f-000000000001",
+      "name": "FiberDoc webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "fiberdoc-checked"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the email from FiberDoc's summary (see integrations/n8n/README.md for the payload).\nconst p = $input.first().json.body;\nconst esc = (s) => String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst c = p.counts || {};\nconst doc = p.document || {};\nconst failed = doc.status === 'error';\nconst prefix = p.test ? '[TEST] ' : '';\nconst subject = failed\n  ? `${prefix}FiberDoc: processing failed for ${doc.name}`\n  : `${prefix}FiberDoc: ${doc.name} checked, ${c.failed || 0} failed, ${(c.total || 0) - (c.passed || 0)} open`;\nconst rows = (p.open_findings || []).map((f) =>\n  `<tr><td>${esc(f.rule_id)}</td><td>${esc(f.title)}</td><td>${esc(f.status).replace('_', ' ')}</td><td>${esc(f.severity)}</td><td>${esc(f.explanation)}</td></tr>`).join('');\nconst html = `\n<p>${esc(p.summary)}</p>\n<p><b>Project:</b> ${esc(p.project?.name)}<br><b>Document type:</b> ${esc((doc.doc_type || '').replace('_', ' '))}<br><b>Pages:</b> ${esc(doc.page_count)}</p>\n<p><b>Failed:</b> ${c.failed || 0} &nbsp; <b>Missing evidence:</b> ${c.missing_evidence || 0} &nbsp; <b>Needs review:</b> ${c.needs_review || 0} &nbsp; <b>Passed:</b> ${c.passed || 0}</p>\n${rows ? `<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px\"><tr><th>Rule</th><th>Finding</th><th>Status</th><th>Severity</th><th>Explanation</th></tr>${rows}</table>` : '<p>No open issues.</p>'}\n<p><a href=\"${esc(p.links?.app)}\">Open FiberDoc AI</a> to review. Findings must be confirmed by a human reviewer; nothing is approved automatically.</p>\n<p style=\"color:#888;font-size:12px\">Demo rule catalogue: invented example requirements, not official standards.</p>`;\nreturn [{ json: { to: p.recipient, subject, html } }];\n"
+      },
+      "id": "b1f0c8e2-1a2b-4c3d-8e9f-000000000002",
+      "name": "Build email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "you@gmail.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "b1f0c8e2-1a2b-4c3d-8e9f-000000000003",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, 0]
+    }
+  ],
+  "connections": {
+    "FiberDoc webhook": { "main": [[{ "node": "Build email", "type": "main", "index": 0 }]] },
+    "Build email": { "main": [[{ "node": "Send email", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

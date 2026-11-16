@@ -11,11 +11,14 @@
  *   getChat        -> GET  /api/chats/{id}         (messages + the documents they refer to)
  *   postMessage    -> POST /api/chats/{id}/messages
  *   getTimings     -> GET  /api/documents/{id}/timings  (where the processing time went)
+ *   automations    -> GET/PUT /api/automations/settings, POST .../settings/secret, POST .../test, GET .../deliveries
  *
  * The backend returns camelCase JSON that already matches ./types, so no mapping is needed.
  * The base URL comes from VITE_API_URL (see frontend/.env).
  */
-import type { BackendDoc, Decision, Finding, Project, SavedChat, SavedChatSummary, SavedMessage, Timings } from './types'
+import type {
+  AutomationSettings, BackendDoc, Decision, Delivery, Finding, Project, SavedChat, SavedChatSummary, SavedMessage, Timings,
+} from './types'
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
@@ -86,3 +89,15 @@ export const postMessage = (chatId: string, role: 'user' | 'assistant', text: st
     method: 'POST',
     body: JSON.stringify({ role, text, kind }),
   })
+
+// Automations: outbound webhook to n8n (emails a summary of each checked document)
+export const getAutomationSettings = () => request<AutomationSettings>('/api/automations/settings')
+
+export const saveAutomationSettings = (s: { enabled: boolean; webhookUrl: string | null; recipientEmail: string | null }) =>
+  request<AutomationSettings>('/api/automations/settings', { method: 'PUT', body: JSON.stringify(s) })
+
+export const rotateAutomationSecret = () => request<AutomationSettings>('/api/automations/settings/secret', { method: 'POST' })
+
+export const sendAutomationTest = () => request<Delivery>('/api/automations/test', { method: 'POST' })
+
+export const listDeliveries = () => request<Delivery[]>('/api/automations/deliveries')

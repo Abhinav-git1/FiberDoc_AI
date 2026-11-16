@@ -11,6 +11,7 @@ from app.schemas import DocumentOut, ProjectIn, ProjectOut, TimingsOut
 from app.services import audit, timing
 from app.services.chat_log import add_message, record_outcome
 from app.services.document_parser import parse_document, validate_upload
+from app.services.notify import notify_document_checked
 from app.services.retrieval import embed_document_chunks
 from app.services.storage import sha256_hex, store_original
 from app.workflow.graph import run_workflow
@@ -74,6 +75,7 @@ def _process(document_id: str, path: Path) -> None:  # path is the stored origin
         # Where the time went, kept with the document's audit trail (GET /api/documents/{id}/timings).
         audit.record(db, "system", "processing_timed", "document", document_id, **t.summary())
         record_outcome(db, document_id)  # the result/error message for the chat it was uploaded from
+        notify_document_checked(db, document_id)  # outbound webhook (n8n -> email), if switched on
 
 
 INTERRUPTED = "Interrupted: the server restarted while this document was being processed. Please re-upload it."

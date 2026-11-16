@@ -28,6 +28,8 @@ disk now (`backend/data/uploads`), object storage when deployed. Only the storag
 | 12 | `workflow_runs` | 🆕 | One row per validation run: status, versions, risk score, errors | Risk / 7-node workflow |
 | 13 | `workflow_steps` | 🆕 | One row per graph node per run: latency, tokens, model | Observability |
 | 14 | `reports` | 🆕 | Versioned generated reports | 7-node workflow |
+| 16 | `automation_settings` | ✅ 0003 | Outbound webhook settings (one row): n8n URL, recipient email, shared token, on/off | n8n email (built) |
+| 17 | `webhook_deliveries` | ✅ 0003 | Log of each webhook delivery: event, status, HTTP code, attempts, error, payload | n8n email (built) |
 | – | LangGraph checkpoint tables | auto | Paused workflow state for resume after review | 7-node workflow |
 | (15) | `geo_features` | 🆕 later | GeoJSON boundary and route points (PostGIS) | GIS extension |
 
@@ -263,6 +265,31 @@ browser was closed.
 | properties | jsonb | |
 | valid | boolean | |
 | issue | text | e.g. "point outside project boundary" |
+
+### 16. `automation_settings` ✅ 0003 (n8n email integration)
+One row (`id = 'default'`), created on first use.
+| Column | Type | Notes |
+|---|---|---|
+| id | varchar PK | always `default` |
+| enabled | boolean | send a summary when a document has been checked |
+| webhook_url | varchar null | the n8n Webhook node's Production URL |
+| recipient_email | varchar null | passed to n8n as `recipient` |
+| secret | varchar | shared token: `X-FiberDoc-Token` header, and the key for `X-FiberDoc-Signature` (HMAC-SHA256) |
+| updated_at | timestamptz | |
+
+### 17. `webhook_deliveries` ✅ 0003
+| Column | Type | Notes |
+|---|---|---|
+| id | varchar PK | |
+| document_id | FK → documents, SET NULL | null for test sends |
+| event | varchar | `document.checked` · `test` |
+| url | varchar | where it was sent |
+| status | varchar | `sent` · `failed` (after up to 3 attempts) |
+| http_status | integer null | null when the connection failed |
+| attempts | integer | |
+| error | text null | |
+| payload | json | exactly what was sent (summary only, never document text) |
+| created_at | timestamptz | indexed; orders the log |
 
 ## How the schema gets changed
 

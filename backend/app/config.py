@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     max_upload_mb: int = 25
     upload_dir: str = "data/uploads"  # originals are kept here, under <project_id>/
+    app_url: str = "http://localhost:5173"  # the frontend; used for links in webhook payloads (emails)
+    webhook_timeout_s: int = 10
 
 
 # LangGraph/LangSmith read LANGSMITH_* from the real environment, which pydantic-settings does not populate.
