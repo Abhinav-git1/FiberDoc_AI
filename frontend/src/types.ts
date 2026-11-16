@@ -146,3 +146,24 @@ export interface Chat {
   /** false = only the title is loaded so far; the messages are fetched when the chat is opened. */
   loaded?: boolean
 }
+
+/** Where one document's processing time went (GET /api/documents/{id}/timings). */
+export interface LlmCall {
+  /** e.g. "embed 8 texts", "generate EvidenceCheck" */
+  op: string
+  /** Including retries and back-off. */
+  seconds: number
+  attempts: number
+  errors: string[]
+  failed: boolean
+  inputTokens: number | null
+  outputTokens: number | null
+  thinkingTokens: number | null
+}
+
+export interface Timings {
+  totalS: number
+  /** parse, embed_chunks, then the workflow nodes in order. */
+  steps: { name: string; seconds: number }[]
+  llmCalls: LlmCall[]
+}

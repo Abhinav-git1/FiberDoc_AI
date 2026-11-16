@@ -18,6 +18,7 @@ from app.schemas import DocClassification
 from app.services import audit
 from app.services.llm import get_llm
 from app.services.retrieval import evidence_chunks_for_rule, rank_rules
+from app.services import timing
 from app.services.semantic import evaluate_semantic_rule
 from app.services.validators import Chunk as VChunk
 from app.services.validators import run_rule_check
@@ -71,6 +72,14 @@ def rule_trace(rule: Rule, doc_type: str, scores: dict | None) -> dict:
         "doc_type": doc_type,
         "ranking": scores,
     }
+
+
+def _timed(name: str, fn):
+    """Wrap a workflow node so its duration is recorded in the timing breakdown."""
+    def node(state: State) -> State:
+        with timing.step(name):
+            return fn(state)
+    return node
 
 
 def build_graph(db: Session):
@@ -177,7 +186,7 @@ def build_graph(db: Session):
     g = StateGraph(State)
     for name, fn in [("classify", classify), ("retrieve_rules", retrieve), ("validate_evidence", validate),
                      ("risk_assessment", assess_risk), ("human_review", human_review)]:
-        g.add_node(name, fn)
+        g.add_node(name, _timed(name, fn))
     g.add_edge(START, "classify")
     g.add_edge("classify", "retrieve_rules")
     g.add_edge("retrieve_rules", "validate_evidence")

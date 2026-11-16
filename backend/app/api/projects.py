@@ -5,10 +5,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Chat, Chunk, Document, Project
+from app.db.models import AuditEvent, Chat, Chunk, Document, Project
 from app.db.session import SessionLocal, get_db
-from app.schemas import DocumentOut, ProjectIn, ProjectOut
-from app.services import audit
+from app.schemas import DocumentOut, ProjectIn, ProjectOut, TimingsOut
+from app.services import audit, timing
 from app.services.chat_log import add_message, record_outcome
 from app.services.document_parser import parse_document, validate_upload
 from app.services.retrieval import embed_document_chunks
@@ -42,22 +42,37 @@ def list_documents(project_id: str, db: Session = Depends(get_db)):
     return list(db.scalars(select(Document).where(Document.project_id == project_id).order_by(Document.created_at)))
 
 
+@router.get("/documents/{document_id}/timings", response_model=TimingsOut, response_model_by_alias=True)
+def document_timings(document_id: str, db: Session = Depends(get_db)):
+    """The timing breakdown of the document's latest processing run. 404 while processing, or for documents
+    processed before timings were recorded (2026-11-15)."""
+    ev = db.scalars(select(AuditEvent).where(AuditEvent.entity_id == document_id, AuditEvent.action == "processing_timed")
+                    .order_by(AuditEvent.at.desc()).limit(1)).first()
+    if ev is None:
+        raise HTTPException(404, "No timings recorded for this document")
+    return TimingsOut.model_validate(ev.detail)
+
+
 def _process(document_id: str, path: Path) -> None:  # path is the stored original; it is kept
     """Background job: parse -> chunk -> embed -> LangGraph workflow."""
-    with SessionLocal() as db:
+    with SessionLocal() as db, timing.track() as t:
         try:
-            parsed = parse_document(path)
-            doc = db.get(Document, document_id)
-            doc.page_count = parsed.page_count
-            db.add_all(Chunk(document_id=document_id, page=c.page, kind=c.kind, text=c.text) for c in parsed.chunks)
-            db.commit()
-            embed_document_chunks(db, document_id)
-            run_workflow(db, document_id)
+            with timing.step("parse"):
+                parsed = parse_document(path)
+                doc = db.get(Document, document_id)
+                doc.page_count = parsed.page_count
+                db.add_all(Chunk(document_id=document_id, page=c.page, kind=c.kind, text=c.text) for c in parsed.chunks)
+                db.commit()
+            with timing.step("embed_chunks"):
+                embed_document_chunks(db, document_id)
+            run_workflow(db, document_id)  # each workflow node records its own step
         except Exception as e:
             db.rollback()
             doc = db.get(Document, document_id)
             doc.status, doc.error = "error", str(e)[:500]
             db.commit()
+        # Where the time went, kept with the document's audit trail (GET /api/documents/{id}/timings).
+        audit.record(db, "system", "processing_timed", "document", document_id, **t.summary())
         record_outcome(db, document_id)  # the result/error message for the chat it was uploaded from
 
 

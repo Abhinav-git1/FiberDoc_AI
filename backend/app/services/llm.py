@@ -6,6 +6,7 @@ from langsmith.run_helpers import get_current_run_tree
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services import timing
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -31,20 +32,33 @@ class GeminiProvider:
         self._dim = s.embed_dim
 
     @staticmethod
-    def _retry(call, attempts: int = 4):
-        """Retry transient Gemini errors (503 overloaded, 429 rate limit) with exponential backoff."""
+    def _retry(op: str, call, attempts: int = 4):
+        """Retry transient Gemini errors (503 overloaded, 429 rate limit) with exponential backoff.
+
+        Every call is recorded for the timing breakdown (app/services/timing.py): total seconds including retries
+        and back-off, the number of attempts, the errors seen, and token counts (thinking tokens separately)."""
         import time
 
         from google.genai import errors
 
+        start, seen = time.perf_counter(), []
         for i in range(attempts):
             try:
-                return call()
-            except (errors.ServerError, errors.ClientError) as e:
-                transient = isinstance(e, errors.ServerError) or getattr(e, "code", None) == 429
+                resp = call()
+            except Exception as e:
+                seen.append(f"{type(e).__name__}: {str(e)[:120]}")
+                transient = isinstance(e, errors.ServerError) or (isinstance(e, errors.ClientError) and getattr(e, "code", None) == 429)
                 if not transient or i == attempts - 1:
+                    timing.llm_call(op, time.perf_counter() - start, i + 1, seen, failed=True)
                     raise
                 time.sleep(2**i)  # 1s, 2s, 4s
+                continue
+            u = getattr(resp, "usage_metadata", None)
+            tokens = {} if u is None else {"input_tokens": getattr(u, "prompt_token_count", None) or 0,
+                                           "output_tokens": getattr(u, "candidates_token_count", None) or 0,
+                                           "thinking_tokens": getattr(u, "thoughts_token_count", None) or 0}
+            timing.llm_call(op, time.perf_counter() - start, i + 1, seen, **tokens)
+            return resp
 
     # Records prompt + answer in LangSmith when LANGSMITH_TRACING=true; a no-op otherwise.
     # embed() is deliberately not traced, so bulk chunk text is not sent to LangSmith.
@@ -53,7 +67,7 @@ class GeminiProvider:
     def generate_structured(self, prompt: str, schema: type[T]) -> T:
         from google.genai import types
 
-        resp = self._retry(lambda: self._client.models.generate_content(
+        resp = self._retry(f"generate {schema.__name__}", lambda: self._client.models.generate_content(
             model=self._model,
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -92,7 +106,7 @@ class GeminiProvider:
         out: list[list[float]] = []
         for i in range(0, len(texts), 50):
             batch = texts[i : i + 50]
-            resp = self._retry(lambda: self._client.models.embed_content(
+            resp = self._retry(f"embed {len(batch)} texts", lambda: self._client.models.embed_content(
                 model=self._embed_model,
                 contents=batch,
                 config=types.EmbedContentConfig(output_dimensionality=self._dim),

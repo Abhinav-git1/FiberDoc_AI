@@ -10,11 +10,12 @@
  *   createChat     -> POST /api/chats
  *   getChat        -> GET  /api/chats/{id}         (messages + the documents they refer to)
  *   postMessage    -> POST /api/chats/{id}/messages
+ *   getTimings     -> GET  /api/documents/{id}/timings  (where the processing time went)
  *
  * The backend returns camelCase JSON that already matches ./types, so no mapping is needed.
  * The base URL comes from VITE_API_URL (see frontend/.env).
  */
-import type { BackendDoc, Decision, Finding, Project, SavedChat, SavedChatSummary, SavedMessage } from './types'
+import type { BackendDoc, Decision, Finding, Project, SavedChat, SavedChatSummary, SavedMessage, Timings } from './types'
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
@@ -76,6 +77,8 @@ export const createChat = (title: string, projectId?: string) =>
   request<SavedChatSummary>('/api/chats', { method: 'POST', body: JSON.stringify({ title, projectId: projectId || null }) })
 
 export const getChat = (id: string) => request<SavedChat>(`/api/chats/${encodeURIComponent(id)}`)
+
+export const getTimings = (documentId: string) => request<Timings>(`/api/documents/${encodeURIComponent(documentId)}/timings`)
 
 /** Only 'text' and 'error' messages can be posted; upload and result messages come from the backend. */
 export const postMessage = (chatId: string, role: 'user' | 'assistant', text: string, kind: 'text' | 'error' = 'text') =>

@@ -6,6 +6,40 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ## 2026-11-15
 
+### Timing breakdown for every document ✅
+**Why:** the first real upload, a 4-page construction plan, took 2 min 25 s. Reading the PDF takes about 3 s, and only two Gemini calls are made for that document (one embedding batch and one semantic rule). So the time is going into Gemini, but nothing recorded where: the database had only the upload and finish times. Measuring first means the speed fix will target the real cause (model "thinking", timeouts, retries or slow responses) instead of a guess. The blueprint also asks for latency per workflow step.
+
+- **`app/services/timing.py`:** a small per-document recorder.
+  - `step()` times a stage, and `llm_call()` records a Gemini call.
+  - Both do nothing when no recorder is open, so tests and scripts are unaffected.
+  - *Why a ContextVar:* LangGraph runs workflow nodes in worker threads and copies the context into them, so steps recorded there reach the same recorder without passing it through every function.
+- **What is timed:**
+  - In `_process`: `parse` and `embed_chunks`.
+  - Each workflow node (`classify`, `retrieve_rules`, `validate_evidence`, `risk_assessment`, `human_review`), wrapped by `_timed()` in `graph.py`.
+- **Every Gemini call** (`GeminiProvider._retry` in `llm.py`) records:
+  - Total seconds, including retries and back-off.
+  - The number of attempts and the errors seen, including calls that finally fail.
+  - Input, output and **thinking** token counts. *Why thinking tokens:* newer Flash models reason before answering by default, which is a likely cause of slow yes/no rule checks.
+- **Stored** as a `processing_timed` audit event, saved for failed runs too. *Why the audit log:* no migration needed, and timings belong with the document's history. A `workflow_steps` table can replace it with the 7-node workflow (roadmap 4).
+- **API:** `GET /api/documents/{id}/timings`. It returns 404 while processing and for documents processed before this change.
+- **Result panel:** a "Where the time went" section with a bar per step, then each Gemini call with its time, attempts, thinking and output tokens, and any errors.
+- **Tests:** `backend/tests/test_timing.py` (5 tests):
+  - No-op without a recorder; steps recorded even when they raise.
+  - Retries recorded with tokens; failed calls recorded.
+  - End to end: `_process` with fakes, a real LangGraph node in a worker thread, and the API returning the record.
+
+**Status:** 118 tests passing, 4 skipped. TypeScript compiles cleanly, with no new lint warnings. The endpoint was checked live (404 for the earlier upload, as expected). The breakdown for a real document needs one re-upload.
+
+**First measurement** (the same 4-page construction plan, re-uploaded): 136.5 s in total.
+- Reading the PDF: 7.1 s. Embedding: 2.4 s, of which the Gemini call was 0.7 s.
+- The other workflow steps: under 0.1 s combined.
+- **Checking the rules: 126.8 s, all of it one Gemini call** for the permit rule (PRM-002). It made 4 attempts and all failed: two "504 deadline exceeded" and two "503 model experiencing high demand".
+- The rule correctly became *needs review*, as it did in the first upload, so the 2-minute wait bought nothing.
+
+The cause is waiting on an overloaded Gemini model, not thinking tokens or our code. The panel now shows error codes ("503 unavailable") instead of only "ServerError".
+
+**Next:** cap each Gemini rule check at a total time budget and fall back to a second model on 503/504. Then speed up PDF table detection.
+
 ### Recent chats stay in the sidebar on every page ✅
 **Why:** the first real upload through the UI worked end to end: a 4-page construction plan, classified correctly, with 14 rules checked, a saved result message, and the result panel with categories. During that test the owner noticed that "Recent chats" disappeared on the Projects, Findings and Review queue pages. Saved chats are how you get back to a result, so they should always be one click away.
 

@@ -76,6 +76,29 @@ class DocumentOut(CamelModel):
     created_at: datetime | None = None
 
 
+class StepTimingOut(CamelModel):
+    name: str  # parse, embed_chunks, or a workflow node (classify, retrieve_rules, validate_evidence, ...)
+    seconds: float
+
+
+class LlmCallOut(CamelModel):
+    op: str  # e.g. "embed 8 texts", "generate EvidenceCheck"
+    seconds: float  # including retries and back-off
+    attempts: int
+    errors: list[str] = []
+    failed: bool = False
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    thinking_tokens: int | None = None
+
+
+class TimingsOut(CamelModel):
+    """Where one document's processing time went (app/services/timing.py)."""
+    total_s: float
+    steps: list[StepTimingOut]
+    llm_calls: list[LlmCallOut]
+
+
 class ChatIn(CamelModel):
     title: str = "New chat"
     project_id: str | None = None

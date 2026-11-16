@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import FindingCard from './FindingCard'
-import { reportUrl } from './api'
-import type { ChatDoc, Decision, Finding, FindingStatus, Project, Severity } from './types'
+import { getTimings, reportUrl } from './api'
+import type { ChatDoc, Decision, Finding, FindingStatus, Project, Severity, Timings } from './types'
 
 const STATUS_ORDER: FindingStatus[] = ['failed', 'missing_evidence', 'needs_review', 'passed']
 const STATUS_LABEL: Record<FindingStatus, string> = {
@@ -96,6 +96,8 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
               </dl>
             </section>
 
+            {s.documentId && (s.phase === 'done' || s.phase === 'error') && <TimingSection documentId={s.documentId} />}
+
             {mine.length > 0 && (
               <>
                 <section className="panel-section">
@@ -159,6 +161,75 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
         )}
       </div>
     </aside>
+  )
+}
+
+const STEP_LABEL: Record<string, string> = {
+  parse: 'Read the file',
+  embed_chunks: 'Embed the text (Gemini)',
+  classify: 'Classify the document',
+  retrieve_rules: 'Find the rules that apply',
+  validate_evidence: 'Check each rule',
+  risk_assessment: 'Assess risk',
+  human_review: 'Save the findings',
+}
+/** "ServerError: 503 UNAVAILABLE. {...}" -> "503 unavailable"; anything else -> its error type. */
+const errorLabel = (e: string) => {
+  const m = e.match(/:\s*(\d{3})\s+([A-Z_]+)/)
+  return m ? `${m[1]} ${m[2].replace(/_/g, ' ').toLowerCase()}` : e.split(':')[0]
+}
+const fmtS = (s: number) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(1)} s`)
+
+/** Where the processing time went: each step, and every Gemini call with its retries and thinking tokens. */
+function TimingSection({ documentId }: { documentId: string }) {
+  const [t, setT] = useState<Timings | null | 'none'>(null)
+  useEffect(() => {
+    let live = true
+    getTimings(documentId).then((x) => live && setT(x), () => live && setT('none'))
+    return () => { live = false }
+  }, [documentId])
+
+  if (t === null) return null
+  return (
+    <section className="panel-section">
+      <h4>Where the time went</h4>
+      {t === 'none' ? (
+        <p className="muted">Not recorded. Timings are kept for documents processed from 15 Nov 2026 on.</p>
+      ) : (
+        <>
+          <div className="time-list">
+            {t.steps.map((st, i) => (
+              <div key={i} className="time-row" title={st.name}>
+                <span className="time-name">{STEP_LABEL[st.name] ?? st.name}</span>
+                <span className="time-bar" aria-hidden><span style={{ width: `${Math.max(1, (100 * st.seconds) / Math.max(t.totalS, 0.001))}%` }} /></span>
+                <span className="time-s">{fmtS(st.seconds)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="muted">Total {fmtS(t.totalS)} on the server.</p>
+          {t.llmCalls.length > 0 && (
+            <>
+              <h5 className="time-sub">Gemini calls ({t.llmCalls.length})</h5>
+              <ul className="time-calls">
+                {t.llmCalls.map((c, i) => (
+                  <li key={i} className={c.failed ? 'err' : ''}>
+                    <span>{c.op}</span>
+                    <span className="time-s">{fmtS(c.seconds)}</span>
+                    <div className="muted">
+                      {[c.attempts > 1 ? `${c.attempts} attempts` : null,
+                        c.thinkingTokens ? `${c.thinkingTokens.toLocaleString()} thinking tokens` : null,
+                        c.outputTokens != null ? `${c.outputTokens.toLocaleString()} output tokens` : null,
+                        c.failed ? 'failed' : null].filter(Boolean).join(' · ')}
+                      {c.errors.length > 0 && <div title={c.errors.join('\n')}>Errors: {c.errors.map(errorLabel).join(', ')}</div>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
