@@ -4,6 +4,14 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-17
+
+### Bigger diagrams on GitHub ✅
+**Why:** GitHub scales each Mermaid diagram down to the page width. The left-to-right diagrams were very wide, so their text came out too small to read.
+
+- The architecture and LangGraph diagrams in `PROJECT_OVERVIEW.md` and `README.md` now run top to bottom (`flowchart TB`), and long labels are split over two lines.
+- All diagrams use an 18 px font (`%%{init}%%` theme variable). That includes the sequence diagram.
+
 ## 2026-11-16
 
 ### README rewritten: technologies and techniques ✅
