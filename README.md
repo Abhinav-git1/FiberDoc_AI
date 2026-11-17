@@ -51,33 +51,34 @@ approved automatically.
 ## Architecture
 
 ```mermaid
-%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart LR
-  subgraph Browser["Browser: React 19 + TypeScript (Vite, :5173)"]
-    UI[Chat & upload · Projects · Automations · Findings · Review queue]
-    OCR[pdf.js + Tesseract.js preview]
+  subgraph Browser["Browser · React 19 + TS (:5173)"]
+    direction TB
+    UI[Chat & upload · Projects<br/>Automations · Findings<br/>Review queue]
+    OCR[pdf.js + Tesseract.js<br/>preview]
+    UI --> OCR
   end
 
   subgraph API["FastAPI backend (:8000)"]
+    direction TB
     R[REST routers /api/...]
-    BG[Background task: parse → embed → workflow]
-    WF[LangGraph: classify → retrieve_rules → validate_evidence → risk_assessment → human_review]
-    N[Outbound webhook: token + HMAC signature, retries]
-    R --> BG --> WF
-    BG --> N
+    BG[Background task:<br/>parse → embed → workflow]
+    WF[LangGraph: classify → retrieve<br/>→ validate → risk → human review]
+    N[Outbound webhook:<br/>token + HMAC, retries]
+    R --> BG --> WF --> N
   end
 
   DB[(PostgreSQL 18 + pgvector<br/>Alembic migrations)]
-  GEM[[Google Gemini<br/>embeddings + structured JSON]]
+  GEM[[Google Gemini<br/>embeddings + JSON]]
   LS[[LangSmith<br/>optional tracing]]
-  N8N[[n8n workflow<br/>Webhook → optional Think → Act agent → SMTP email]]
+  N8N[[n8n: optional Think → Act<br/>agent → SMTP email]]
 
-  UI -- "fetch, JSON (camelCase)" --> R
-  WF <--> DB
-  R <--> DB
-  WF -- "embed / generate" --> GEM
-  WF -.traces + token usage.-> LS
-  N -- "summary only" --> N8N
+  Browser -- "fetch, JSON" --> API
+  API <--> DB
+  API -- "embed / generate" --> GEM
+  API -. "traces + tokens" .-> LS
+  API -- "summary only" --> N8N
 ```
 
 ---

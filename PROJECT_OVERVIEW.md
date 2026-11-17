@@ -60,38 +60,37 @@ reviewer** then approves or rejects each finding.
 ## 2. System architecture
 
 ```mermaid
-%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart LR
-  subgraph Browser["Browser · React + Vite (localhost:5173)"]
-    UI[App.tsx / Views.tsx / ChatView.tsx]
+  subgraph Browser["Browser · React + Vite (:5173)"]
+    direction TB
+    UI[App.tsx · Views.tsx<br/>ChatView.tsx]
     API[api.ts · fetch]
-    OCR[ocr.ts · pdf.js + Tesseract]
+    OCR[ocr.ts<br/>pdf.js + Tesseract]
     UI --> API
     UI --> OCR
   end
 
-  subgraph Server["FastAPI (localhost:8000)"]
-    R1[api/projects.py]
-    R2[api/findings.py]
-    R3[api/chats.py · reports.py · automations.py]
+  subgraph Server["FastAPI (:8000)"]
+    direction TB
+    R[api/projects · findings<br/>chats · reports · automations]
     BG[Background task _process]
     WF[LangGraph workflow]
-    SVC[services: parser · validators · retrieval · llm · audit]
-    R1 --> BG --> WF --> SVC
-    R2 --> SVC
+    SVC[services: parser · validators<br/>retrieval · llm · audit · notify]
+    R --> BG --> WF --> SVC
+    R --> SVC
   end
 
-  DB[(PostgreSQL + pgvector<br/>localhost :5432)]
-  GEM[[Google Gemini API<br/>embeddings + structured JSON]]
+  DB[(PostgreSQL + pgvector<br/>:5432)]
+  GEM[[Google Gemini<br/>embeddings + JSON]]
   LS[[LangSmith<br/>optional tracing]]
-
-  API -- "JSON over HTTP · CORS-allowed" --> R1
-  API --> R2
-  SVC <--> DB
-  SVC -- "embed / generate" --> GEM
-  WF -.traces.-> LS
   N8N[[n8n<br/>email workflow]]
-  BG -- "webhook: summary only" --> N8N
+
+  Browser -- "JSON over HTTP" --> Server
+  Server <--> DB
+  Server -- "embed / generate" --> GEM
+  Server -. traces .-> LS
+  Server -- "webhook:<br/>summary only" --> N8N
 ```
 
 ---

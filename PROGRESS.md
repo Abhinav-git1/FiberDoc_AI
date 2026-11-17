@@ -10,6 +10,7 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 **Why:** GitHub scales each Mermaid diagram down to the page width, so the wide left-to-right flowcharts came out with tiny text. The owner prefers the horizontal layout.
 
 - The flowcharts are kept horizontal, as they were, with `%%{init: {"flowchart": {"useMaxWidth": false}}}%%` added. They now render at their natural size, and you scroll sideways if a diagram is wider than the page.
+- **Architecture diagrams** (overview and README): the flow stays left to right (browser → server → database and services), but the boxes inside each group stack top to bottom (`direction TB`), so the diagram is narrower and taller and GitHub shows it bigger, with an 18 px font. Arrows connect the groups rather than the boxes inside them, because Mermaid ignores a group's direction when arrows reach into it.
 - Tried and reverted the same day: a top-to-bottom layout with an 18 px font, which came out too big, then a toned-down version.
 
 ## 2026-11-16
