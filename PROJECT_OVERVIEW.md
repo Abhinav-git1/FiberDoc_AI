@@ -60,9 +60,9 @@ reviewer** then approves or rejects each finding.
 ## 2. System architecture
 
 ```mermaid
-flowchart TB
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
   subgraph Browser["Browser · React + Vite (localhost:5173)"]
-    direction LR
     UI[App.tsx / Views.tsx / ChatView.tsx]
     API[api.ts · fetch]
     OCR[ocr.ts · pdf.js + Tesseract]
@@ -71,29 +71,26 @@ flowchart TB
   end
 
   subgraph Server["FastAPI (localhost:8000)"]
-    direction LR
     R1[api/projects.py]
     R2[api/findings.py]
-    R3[api/chats.py · reports.py<br/>automations.py]
+    R3[api/chats.py · reports.py · automations.py]
     BG[Background task _process]
     WF[LangGraph workflow]
-    SVC[services: parser · validators<br/>retrieval · llm · audit · notify]
+    SVC[services: parser · validators · retrieval · llm · audit]
     R1 --> BG --> WF --> SVC
     R2 --> SVC
-    R3 --> SVC
   end
 
   DB[(PostgreSQL + pgvector<br/>localhost :5432)]
   GEM[[Google Gemini API<br/>embeddings + structured JSON]]
   LS[[LangSmith<br/>optional tracing]]
-  N8N[[n8n<br/>email workflow]]
 
-  API -- "JSON over HTTP" --> R1
+  API -- "JSON over HTTP · CORS-allowed" --> R1
   API --> R2
-  API --> R3
   SVC <--> DB
   SVC -- "embed / generate" --> GEM
-  WF -. traces .-> LS
+  WF -.traces.-> LS
+  N8N[[n8n<br/>email workflow]]
   BG -- "webhook: summary only" --> N8N
 ```
 
@@ -144,6 +141,7 @@ workflow, and with the Think → Act workflow n8n sends that summary to Gemini.
 ### Step C: The LangGraph pipeline (`workflow/graph.py`)
 
 ```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
 flowchart LR
   S((START)) --> C[classify]
   C --> RR[retrieve_rules]

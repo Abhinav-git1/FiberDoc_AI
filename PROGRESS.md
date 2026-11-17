@@ -7,10 +7,10 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 ## 2026-11-17
 
 ### Bigger diagrams on GitHub ✅
-**Why:** GitHub scales each Mermaid diagram down to the page width. The left-to-right diagrams were very wide, so their text came out too small to read.
+**Why:** GitHub scales each Mermaid diagram down to the page width, so the wide left-to-right flowcharts came out with tiny text. The owner prefers the horizontal layout.
 
-- The architecture and LangGraph diagrams in `PROJECT_OVERVIEW.md` and `README.md` now run top to bottom (`flowchart TB`), and long labels are split over two lines.
-- Follow-up the same day: that was too big. The font is back to the default and the LangGraph pipeline is left to right again (its short labels fit the width). The architecture diagrams stay top to bottom, with the server boxes inside them laid out side by side so the diagram isn't too tall.
+- The flowcharts are kept horizontal, as they were, with `%%{init: {"flowchart": {"useMaxWidth": false}}}%%` added. They now render at their natural size, and you scroll sideways if a diagram is wider than the page.
+- Tried and reverted the same day: a top-to-bottom layout with an 18 px font, which came out too big, then a toned-down version.
 
 ## 2026-11-16
 

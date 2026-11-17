@@ -51,19 +51,18 @@ approved automatically.
 ## Architecture
 
 ```mermaid
-flowchart TB
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
   subgraph Browser["Browser: React 19 + TypeScript (Vite, :5173)"]
-    direction LR
-    UI[Chat & upload · Projects · Automations<br/>Findings · Review queue]
+    UI[Chat & upload · Projects · Automations · Findings · Review queue]
     OCR[pdf.js + Tesseract.js preview]
   end
 
   subgraph API["FastAPI backend (:8000)"]
-    direction LR
     R[REST routers /api/...]
-    BG[Background task:<br/>parse → embed → workflow]
-    WF[LangGraph: classify → retrieve_rules<br/>→ validate_evidence → risk_assessment<br/>→ human_review]
-    N[Outbound webhook:<br/>token + HMAC signature, retries]
+    BG[Background task: parse → embed → workflow]
+    WF[LangGraph: classify → retrieve_rules → validate_evidence → risk_assessment → human_review]
+    N[Outbound webhook: token + HMAC signature, retries]
     R --> BG --> WF
     BG --> N
   end
