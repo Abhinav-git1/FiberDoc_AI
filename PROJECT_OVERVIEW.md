@@ -60,7 +60,6 @@ reviewer** then approves or rejects each finding.
 ## 2. System architecture
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart TB
   subgraph Browser["Browser · React + Vite (localhost:5173)"]
     direction LR
@@ -72,7 +71,7 @@ flowchart TB
   end
 
   subgraph Server["FastAPI (localhost:8000)"]
-    direction TB
+    direction LR
     R1[api/projects.py]
     R2[api/findings.py]
     R3[api/chats.py · reports.py<br/>automations.py]
@@ -145,8 +144,7 @@ workflow, and with the Think → Act workflow n8n sends that summary to Gemini.
 ### Step C: The LangGraph pipeline (`workflow/graph.py`)
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
-flowchart TB
+flowchart LR
   S((START)) --> C[classify]
   C --> RR[retrieve_rules]
   RR --> V[validate_evidence]
@@ -220,7 +218,6 @@ and returns the updated finding.
 
 ### Data flow (current)
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 sequenceDiagram
   participant U as Reviewer
   participant A as App.tsx

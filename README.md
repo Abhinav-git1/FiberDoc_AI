@@ -51,7 +51,6 @@ approved automatically.
 ## Architecture
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}}}%%
 flowchart TB
   subgraph Browser["Browser: React 19 + TypeScript (Vite, :5173)"]
     direction LR
@@ -60,7 +59,7 @@ flowchart TB
   end
 
   subgraph API["FastAPI backend (:8000)"]
-    direction TB
+    direction LR
     R[REST routers /api/...]
     BG[Background task:<br/>parse → embed → workflow]
     WF[LangGraph: classify → retrieve_rules<br/>→ validate_evidence → risk_assessment<br/>→ human_review]
