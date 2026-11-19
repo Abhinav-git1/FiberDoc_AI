@@ -68,6 +68,8 @@ class DocumentOut(CamelModel):
     project_id: str
     name: str
     doc_type: str
+    doc_type_confidence: float | None = None  # 0-1; None for documents classified before 2026-11-19
+    doc_type_reason: str | None = None
     status: str
     page_count: int
     error: str | None = None

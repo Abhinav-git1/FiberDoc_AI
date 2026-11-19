@@ -11,6 +11,34 @@ from app.services import timing
 T = TypeVar("T", bound=BaseModel)
 
 
+class QuotaExhausted(RuntimeError):
+    """Every model's quota is used up (until the time Gemini gave); no request was made."""
+
+
+# model -> time.perf_counter() value when its quota resets. Process-wide, so once a daily quota is gone no later
+# call waits on that model again until the reset Gemini announced. Cleared on restart.
+_quota_reset_at: dict[str, float] = {}
+
+
+def _retry_after_s(message: str) -> float | None:
+    """Seconds Gemini says to wait, from "Please retry in 11h56m7.2s" or "'retryDelay': '42s'"; None if absent."""
+    import re
+
+    m = re.search(r"retry in ((?:\d+h)?(?:\d+m)?(?:[\d.]+s)?)", message) or         re.search(r"'retryDelay': '([\d.]+s)'", message)
+    if not m or not m.group(1):
+        return None
+    parts = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", m.group(1))
+    if not parts:
+        return None
+    h, mins, secs = parts.groups()
+    return int(h or 0) * 3600 + int(mins or 0) * 60 + float(secs or 0)
+
+
+def _fmt_wait(s: float) -> str:
+    h, rem = divmod(max(0, int(s)), 3600)
+    return f"{h}h{rem // 60:02d}m" if h else f"{rem // 60}m{rem % 60:02d}s"
+
+
 class LLMProvider(Protocol):
     def generate_structured(self, prompt: str, schema: type[T]) -> T: ...
     def embed(self, texts: list[str]) -> list[list[float]]: ...
@@ -41,7 +69,11 @@ class GeminiProvider:
         `call(model, timeout_s)` makes one request. Errors are handled like this:
         - 503 overloaded / 504 deadline / a client-side timeout: try the next model in `models` right away (no
           sleep the first time each model is tried), since waiting on a busy model is what made uploads take minutes.
-        - 429 rate limit: exponential back-off on the same model.
+        - 429 with a long wait (a daily quota: "retry in 11h56m"): that model is skipped until its quota resets,
+          for every later call too, and the next model is tried at once. Quotas are per model, so the fallback
+          usually still has some. (2026-11-19: five back-offs on a model whose daily quota was gone used the whole
+          budget for nothing.)
+        - 429 with a short wait (a per-minute limit): the next model if there is an untried one, else back off.
         - Anything else (400, a bad key): raise at once.
         No request may run past `budget_s` in total; when too little is left for a useful attempt, the last error is
         raised and the caller marks the rule 'needs review'. The budget, not `attempts`, is what normally ends a run
@@ -59,8 +91,14 @@ class GeminiProvider:
         min_attempt_s = 5.0  # less time than this left: not worth another request
         max_delay_s = 16
         start, seen, tried, m = time.perf_counter(), [], set(), 0
+        live = [x for x in models if _quota_reset_at.get(x, 0) <= start]
+        if not live:
+            waits = ", ".join(f"{x} in {_fmt_wait(_quota_reset_at[x] - start)}" for x in models)
+            seen.append(f"QuotaExhausted: daily quota used up; resets: {waits}")
+            timing.llm_call(op, 0.0, 0, seen, failed=True, model=models[0])
+            raise QuotaExhausted(seen[-1])
         for i in range(attempts):
-            model = models[m]
+            model = live[m]
             tried.add(model)
             remaining = budget_s - (time.perf_counter() - start)
             try:
@@ -69,15 +107,20 @@ class GeminiProvider:
                 seen.append(f"{model}: {type(e).__name__}: {str(e)[:120]}")
                 overloaded = isinstance(e, (errors.ServerError, httpx.TimeoutException))
                 rate_limited = isinstance(e, errors.ClientError) and getattr(e, "code", None) == 429
+                hint = _retry_after_s(str(e)) if rate_limited else None
                 delay = 0.0
-                if overloaded and len(models) > 1:
-                    m = (m + 1) % len(models)
-                    if models[m] in tried:  # every model has failed once: back off before going round again
-                        delay = float(min(2 ** (i - 1), max_delay_s))
+                if rate_limited and hint is not None and hint > budget_s:  # quota gone for hours: skip this model
+                    _quota_reset_at[model] = time.perf_counter() + hint
+                    live.remove(model)
+                    m = m % len(live) if live else 0
+                elif (overloaded or rate_limited) and len(live) > 1:
+                    m = (m + 1) % len(live)
+                    if live[m] in tried:  # every model has failed once: back off before going round again
+                        delay = float(min(hint or 2 ** (i - 1), max_delay_s))
                 elif overloaded or rate_limited:
-                    delay = float(min(2**i, max_delay_s))  # 1, 2, 4, 8, 16 s
+                    delay = float(min(hint or 2**i, max_delay_s))  # 1, 2, 4, 8, 16 s
                 left = budget_s - (time.perf_counter() - start) - delay
-                if not (overloaded or rate_limited) or i == attempts - 1 or left < min_attempt_s:
+                if not (overloaded or rate_limited) or not live or i == attempts - 1 or left < min_attempt_s:
                     timing.llm_call(op, time.perf_counter() - start, i + 1, seen, failed=True, model=model)
                     raise
                 if delay:
@@ -91,7 +134,12 @@ class GeminiProvider:
             return resp, model
 
     def _models(self) -> list[str]:
-        return [self._model] + ([self._fallback] if self._fallback and self._fallback != self._model else [])
+        """The main model, then each backup once (blank and repeated names dropped)."""
+        out = [self._model]
+        for name in (x.strip() for x in self._fallback.split(",")):
+            if name and name not in out:
+                out.append(name)
+        return out
 
     # Records prompt + answer in LangSmith when LANGSMITH_TRACING=true; a no-op otherwise.
     # embed() is deliberately not traced, so bulk chunk text is not sent to LangSmith.

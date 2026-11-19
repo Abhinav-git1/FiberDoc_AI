@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Chunk, Document, Finding, Rule
 from app.schemas import DocClassification
-from app.services import audit
+from app.services import audit, classifier
 from app.services.llm import get_llm
 from app.services.retrieval import evidence_chunks_for_rule, rank_rules
 from app.services import timing
@@ -23,13 +23,6 @@ from app.services.semantic import evaluate_semantic_rule
 from app.services.validators import Chunk as VChunk
 from app.services.validators import run_rule_check
 
-DOC_TYPE_HINTS = {
-    "construction_plan": ["construction plan", "scope of work", "trenching", "splice plan"],
-    "design_summary": ["design summary", "design basis", "cable schedule"],
-    "as_built": ["as-built", "as built", "record drawing"],
-    "permit": ["permit no", "permit number", "right-of-way permit"],
-    "test_report": ["otdr", "test report", "insertion loss"],
-}
 SEVERITY_ORDER = ["low", "medium", "high"]
 EXCERPT_CHARS = 300  # how much of each evidence chunk the retrieval trace keeps
 
@@ -74,6 +67,22 @@ def rule_trace(rule: Rule, doc_type: str, scores: dict | None) -> dict:
     }
 
 
+def _mean_embedding(chunks: list[Chunk]) -> list[float] | None:
+    """Document-level embedding: the mean of its chunk embeddings (None if none were embedded)."""
+    embs = [c.embedding for c in chunks if c.embedding is not None]
+    return [sum(col) / len(embs) for col in zip(*embs)] if embs else None
+
+
+_type_vectors: dict[str, list[float]] = {}  # description -> embedding; the descriptions are fixed, so embed once
+
+
+def _embed_type_descriptions(texts: list[str]) -> list[list[float]]:
+    missing = [t for t in texts if t not in _type_vectors]
+    if missing:
+        _type_vectors.update(zip(missing, get_llm().embed(missing)))
+    return [_type_vectors[t] for t in texts]
+
+
 def _timed(name: str, fn):
     """Wrap a workflow node so its duration is recorded in the timing breakdown."""
     def node(state: State) -> State:
@@ -84,33 +93,31 @@ def _timed(name: str, fn):
 
 def build_graph(db: Session):
     def _chunks(document_id: str) -> list[Chunk]:
-        return list(db.scalars(select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.page)))
+        return list(db.scalars(select(Chunk).where(Chunk.document_id == document_id)
+                               .order_by(Chunk.page, Chunk.seq.asc().nulls_last())))
 
     def classify(state: State) -> State:
+        """Document type from weighted keywords, an embedding tie-breaker and Gemini (app/services/classifier.py)."""
         chunks = _chunks(state["document_id"])
-        text = " ".join(c.text for c in chunks).lower()
-        scores = {t: sum(text.count(h) for h in hints) for t, hints in DOC_TYPE_HINTS.items()}
-        best, hits = max(scores.items(), key=lambda kv: kv[1])
-        if hits >= 2:
-            doc_type = best  # deterministic path
-        else:
-            try:
-                doc_type = get_llm().generate_structured(
-                    "Classify this document into one type. Text excerpt:\n" + text[:4000], DocClassification
-                ).doc_type
-            except Exception:
-                doc_type = "other"
+        pages: dict[int, list[str]] = {}
+        for ch in chunks:
+            pages.setdefault(ch.page, []).append(ch.text)
+        page_texts = ["\n".join(pages[p]) for p in sorted(pages)]
+        result = classifier.classify(
+            page_texts, _mean_embedding(chunks), embed_types=_embed_type_descriptions,
+            ask_llm=lambda excerpt: get_llm().generate_structured(
+                "Classify this document into one type. Text excerpt:\n" + excerpt, DocClassification).doc_type)
         doc = db.get(Document, state["document_id"])
-        doc.doc_type, doc.status = doc_type, "processing"
+        doc.doc_type, doc.status = result.doc_type, "processing"
+        doc.doc_type_confidence, doc.doc_type_reason = result.confidence, result.reason
         db.commit()
-        return {"doc_type": doc_type}
+        audit.record(db, "system", "document_classified", "document", doc.id, **result.audit())
+        return {"doc_type": result.doc_type}
 
     def retrieve(state: State) -> State:
         chunks = _chunks(state["document_id"])
         text = " ".join(c.text for c in chunks)
-        # Document-level embedding = mean of chunk embeddings (if present).
-        embs = [c.embedding for c in chunks if c.embedding is not None]
-        doc_emb = [sum(col) / len(embs) for col in zip(*embs)] if embs else None
+        doc_emb = _mean_embedding(chunks)
         ranked = rank_rules(db, state["doc_type"], text, doc_emb)
         return {"rule_ids": [s.rule.id for s in ranked], "rule_scores": {s.rule.id: s.trace() for s in ranked}}
 

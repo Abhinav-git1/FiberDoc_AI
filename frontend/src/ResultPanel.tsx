@@ -87,7 +87,12 @@ export default function ResultPanel({ doc, findings, projects, onReview, onClose
               <h4>Details</h4>
               <dl className="details">
                 <dt>Project</dt><dd>{project?.name ?? '-'}</dd>
-                <dt>Document type</dt><dd>{s.doc ? s.doc.docType.replace(/_/g, ' ') : '-'}</dd>
+                <dt>Document type</dt>
+                <dd>
+                  {s.doc ? s.doc.docType.replace(/_/g, ' ') : '-'}
+                  {s.doc?.docTypeConfidence != null && ` · ${Math.round(s.doc.docTypeConfidence * 100)}% sure`}
+                  {s.doc?.docTypeReason && <div className="muted">{s.doc.docTypeReason}</div>}
+                </dd>
                 <dt>Pages</dt><dd>{s.doc?.pageCount || '-'}</dd>
                 <dt>Size</dt><dd>{doc.size ? fmtSize(doc.size) : '-'}</dd>
                 <dt>Processing time</dt><dd>{s.finishedAt ? fmtDuration(s.finishedAt - s.startedAt) : '-'}</dd>

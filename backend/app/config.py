@@ -12,9 +12,11 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
-    # Second model tried when the main one is overloaded (503) or too slow (504 / timeout). Empty = no fallback.
+    # Backup models, comma-separated, tried in order when the main one is overloaded (503), too slow (504 / timeout)
+    # or out of quota (429). Empty = no fallback. Each model has its own free-tier daily quota (20 requests on
+    # 2026-11-19), so three backups give about four times the free capacity without billing (the owner's choice).
     # A different model generation runs on separate capacity, so it is usually free when the main one is busy.
-    gemini_fallback_model: str = "gemini-3.7-flash"
+    gemini_fallback_model: str = "gemini-3.7-flash,gemini-3.5-flash,gemini-3.1-flash-lite"
     gemini_timeout_s: int = 30  # per HTTP request; without it a stalled call leaves a document 'processing' forever
     # Total time for one Gemini call, retries and model switches included. Past it the rule becomes 'needs review'
     # (a person checks it) instead of the upload waiting minutes on an overloaded model.

@@ -62,7 +62,8 @@ def _process(document_id: str, path: Path) -> None:  # path is the stored origin
                 parsed = parse_document(path)
                 doc = db.get(Document, document_id)
                 doc.page_count = parsed.page_count
-                db.add_all(Chunk(document_id=document_id, page=c.page, kind=c.kind, text=c.text) for c in parsed.chunks)
+                db.add_all(Chunk(document_id=document_id, page=c.page, kind=c.kind, text=c.text, seq=i)
+                           for i, c in enumerate(parsed.chunks))
                 db.commit()
             with timing.step("embed_chunks"):
                 embed_document_chunks(db, document_id)

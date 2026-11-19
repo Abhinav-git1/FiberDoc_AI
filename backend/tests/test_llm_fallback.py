@@ -126,7 +126,8 @@ def test_bad_request_is_not_retried_on_the_fallback(monkeypatch):
 def test_models_list_skips_an_empty_or_duplicate_fallback():
     p = object.__new__(llm.GeminiProvider)
     p._model = PRIMARY
-    for fb, want in [(FALLBACK, [PRIMARY, FALLBACK]), ("", [PRIMARY]), (PRIMARY, [PRIMARY])]:
+    for fb, want in [(FALLBACK, [PRIMARY, FALLBACK]), ("", [PRIMARY]), (PRIMARY, [PRIMARY]),
+                     (f" {FALLBACK}, gemini-c ,,{FALLBACK}", [PRIMARY, FALLBACK, "gemini-c"])]:
         p._fallback = fb
         assert p._models() == want
 
@@ -158,3 +159,79 @@ def test_overload_that_clears_gets_a_real_answer(monkeypatch):
 
     resp, _ = llm.GeminiProvider._retry("generate EvidenceCheck", call, [PRIMARY, FALLBACK], 60, 30)
     assert resp == "ok" and clock.now < 60
+
+
+def _quota(wait: str):
+    return errors.ClientError(429, {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                                              "message": f"Generate content requests per day exceeded. Please retry in {wait}."}})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_quotas():
+    llm._quota_reset_at.clear()
+    yield
+    llm._quota_reset_at.clear()
+
+
+def test_daily_quota_switches_model_at_once_and_is_remembered(monkeypatch):
+    """2026-11-19: five back-offs on a model whose daily quota (20 requests) was gone used the whole 60 s."""
+    clock, asked = Clock(monkeypatch), []
+
+    def call(model, timeout_s):
+        asked.append(model)
+        if model == PRIMARY:
+            raise _quota("11h56m7.2s")
+        return "ok"
+
+    assert llm.GeminiProvider._retry("generate X", call, [PRIMARY, FALLBACK], 60, 30)[1] == FALLBACK
+    assert clock.sleeps == [] and asked == [PRIMARY, FALLBACK]
+    llm.GeminiProvider._retry("generate X", call, [PRIMARY, FALLBACK], 60, 30)  # the next call skips PRIMARY
+    assert asked == [PRIMARY, FALLBACK, FALLBACK]
+
+
+def test_all_quotas_gone_fails_without_waiting(monkeypatch):
+    clock = Clock(monkeypatch)
+
+    def call(model, timeout_s):
+        raise _quota("5h0m0s")
+
+    with pytest.raises(errors.ClientError):
+        llm.GeminiProvider._retry("generate X", call, [PRIMARY, FALLBACK], 60, 30)
+    assert clock.now == 0 and clock.sleeps == []
+    with timing.track() as t, pytest.raises(llm.QuotaExhausted, match="resets"):
+        llm.GeminiProvider._retry("generate X", call, [PRIMARY, FALLBACK], 60, 30)  # no request made at all
+    assert t.llm_calls[0]["attempts"] == 0
+
+
+def test_quota_is_tried_again_after_its_reset(monkeypatch):
+    clock, n = Clock(monkeypatch), []
+
+    def call(model, timeout_s):
+        n.append(model)
+        if len(n) == 1:
+            raise _quota("1h0m0s")
+        return "ok"
+
+    with pytest.raises(errors.ClientError):
+        llm.GeminiProvider._retry("generate X", call, [PRIMARY], 60, 30)
+    clock.now += 3601
+    assert llm.GeminiProvider._retry("generate X", call, [PRIMARY], 60, 30) == ("ok", PRIMARY)
+
+
+def test_short_rate_limit_waits_as_told(monkeypatch):
+    clock, n = Clock(monkeypatch), []
+
+    def call(model, timeout_s):
+        n.append(model)
+        if len(n) == 1:
+            raise _quota("7s")
+        return "ok"
+
+    assert llm.GeminiProvider._retry("generate X", call, [PRIMARY], 60, 30)[0] == "ok"
+    assert clock.sleeps == [7.0] and PRIMARY not in llm._quota_reset_at
+
+
+def test_retry_hint_parsing():
+    assert llm._retry_after_s("Please retry in 11h56m7.5s.") == 11 * 3600 + 56 * 60 + 7.5
+    assert llm._retry_after_s("'retryDelay': '42s'") == 42
+    assert llm._retry_after_s("no hint") is None

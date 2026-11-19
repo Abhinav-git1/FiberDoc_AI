@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import get_settings
@@ -45,6 +45,9 @@ class Document(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
     name: Mapped[str] = mapped_column(String)
     doc_type: Mapped[str] = mapped_column(String, default="unknown")
+    # How sure the classifier was (0-1) and why, in words (app/services/classifier.py). NULL before 2026-11-19.
+    doc_type_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    doc_type_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="uploaded")  # uploaded|processing|awaiting_review|error
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -69,6 +72,7 @@ class Chunk(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"))
     page: Mapped[int] = mapped_column(Integer, default=1)
     kind: Mapped[str] = mapped_column(String, default="text")  # text|table
+    seq: Mapped[int | None] = mapped_column(Integer, nullable=True)  # reading order in the parsed document
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(DIM), nullable=True)
     document: Mapped[Document] = relationship(back_populates="chunks")

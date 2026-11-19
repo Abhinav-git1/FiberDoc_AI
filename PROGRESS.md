@@ -6,6 +6,60 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ## 2026-11-19
 
+### Roadmap step 1: classifier fix ✅
+**Why:** the classifier picks which rules a document is checked against. The sample construction plan (`samples/demo_small_construction_plan.pdf`) was classified as `design_summary`: its headings "Design Summary" and "Cable Schedule" scored 3 hits against 1 for "Construction Plan" in the title, because every hit counted the same wherever it appeared. As a result, every construction-only rule was skipped. *(The owner's test upload, `FiberDoc_OSP_Construction_Plan_Test.pdf`, was always classified correctly, 14 hits to 3. That's why the issue hadn't shown up in the UI.)*
+
+- **`backend/app/services/classifier.py`** (new; the logic moved out of `graph.py` so it can be tested without a database). The evidence is used in this order:
+  1. **Weighted keywords.** A hint in the **title zone** (the first 4 non-empty lines of page 1) counts **5×**. *Why:* the title says what the document *is*; headings say what it *contains*. The leader wins on keywords alone only if it is ahead by **1.5× and at least 2 points**, so one stray hit (2 to 1) doesn't decide it.
+  2. **Embedding tie-breaker** for close calls: the document's mean chunk embedding is compared with a short description of each close type, and the nearest wins. The descriptions are embedded once per server run and cached.
+  3. **Gemini**, as before, only when no type has enough hints. If the model or the tie-breaker fails, the next-best evidence is used, so it never crashes.
+- **Confidence and reason** on every document (Alembic **`0004`**: `documents.doc_type_confidence`, `doc_type_reason`). Example: "Keywords: construction plan hints 1 in the title, against design summary 3 in the text. Title hits count 5x." The numbers are simple heuristics, not calibrated:
+  - keywords: leader ÷ (leader + runner-up), capped at 0.95
+  - tie-breaker: 0.5–0.75 depending on how clear the gap is
+  - Gemini: 0.6
+  - unknown: 0
+
+  The confidence is about the *type* only, kept apart from risk (blueprint section 7). The result panel shows "construction plan · 62% sure" with the reason underneath.
+- **Audit:** a `document_classified` event with the full scores per type (title hits, body hits, weighted score, similarity). *Why:* a wrong type can be traced back without re-running anything.
+- **Reading order of chunks** (`chunks.seq`, also in `0004`). *Why:* chunk ids are random, so the order of chunks within a page was undefined, and the title zone couldn't be found reliably. Older chunks have no `seq` and sort last.
+- **Tests:** `backend/tests/test_classifier.py` (7 tests):
+  - the sample PDF is now `construction_plan` (0.62)
+  - the title zone and the weights
+  - a clear lead makes no model calls
+  - a close call is settled by the embedding
+  - a close call with no embeddings, or a failing tie-breaker, keeps the leader and says so
+  - Gemini as the last resort, and its failure handled
+
+**Status:** 139 tests passing, 4 skipped. TypeScript compiles; the changed files have no lint warnings. Migration `0004` applied to the local database. Live check with real Gemini embeddings: the sample is nearest `construction_plan` (0.735), ahead of `design_summary` (0.652), so the tie-breaker points the right way. The owner's test PDF: `construction_plan`, 0.82.
+
+**First UI check didn't use the new code:** the backend had been started with `--reload` from Claude's background shell. The reload hung after "Reloading..." and the 11:05 worker kept serving, so the sample upload still came out `design_summary`, with no confidence. This is the hang the README's Windows note already describes. The server was restarted without `--reload` (`--timeout-graceful-shutdown 3` didn't help either).
+
+**UI check passed** (after a plain restart): the sample came out as **construction plan · 62% sure**, with the reason shown. **14 rules** were checked instead of 7, including the construction-only rules CON-007, CON-012, CON-015, CON-019, QA-014 and SAF-002, which had never been checked on this document before.
+
+### Daily quota: skip the exhausted model ✅
+**Why:** in that same upload, the one Gemini rule spent the full 60 s on five 429s and a 504. The 429s were the **free tier's daily limit** (20 requests a day on `gemini-3.8-flash`, "retry in 11h56m"), and backing off for 16 s can't help with a limit that resets in 12 hours. Quotas are per model, so the fallback should be tried at once.
+
+- `_retry` reads Gemini's wait hint ("retry in 11h56m7s" or `retryDelay`). If the wait is longer than the call's budget, that model is **skipped for every later call until its quota resets** (`_quota_reset_at`, process-wide, cleared on restart), and the next model is tried at once.
+- If every model is exhausted, the call fails at once with `QuotaExhausted` ("resets: gemini-3.8-flash in 11h56m…") without sending a request, and the rule becomes *needs review*.
+- A short 429 (per-minute limit) switches model if there is an untried one; otherwise it waits as long as Gemini says (at most 16 s).
+- **Tests:** 5 more in `test_llm_fallback.py`:
+  - a daily quota switches model at once and is remembered
+  - all quotas gone fails without waiting or sending a request
+  - a model is tried again after its reset
+  - a short limit waits as told
+  - hint parsing
+
+**Status:** 144 tests passing, 4 skipped. Live: 3.8 out of quota → 3.7 at once (a 503, then its daily quota was gone too) → gave up in **6.4 s instead of 60 s**. The next call failed in 0 s without a request. Server restarted.
+
+### More backup models, no billing ✅
+**Why:** with both daily quotas used up, every Gemini rule would be *needs review* until they reset. The owner ruled out billing. Each model has its own free daily quota, so more backups add free capacity.
+
+- `GEMINI_FALLBACK_MODEL` now takes a **comma-separated list**, tried in order. The default is `gemini-3.7-flash,gemini-3.5-flash,gemini-3.1-flash-lite`, which gives about 4× the free capacity. Blank and repeated names are dropped. (`gemini-2.5-flash` is retired: it returns 404.)
+- *Trade-off:* `flash-lite` is the weakest of the four. It is only reached when the others are busy or out of quota. Its answers still go through the grounding check, and every finding still waits for a human.
+- **Live:** 3.8 and 3.7 were out of quota and 3.5 returned 503, so **3.1-flash-lite answered in 5.7 s**. 144 tests passing.
+
+**Next:** speed up PDF reading. Roadmap step 2 is Recall@3/@5. Then speed up PDF reading. Roadmap step 2 is Recall@3/@5.
+
 ### Speed fix: time budget and fallback model for Gemini ✅
 **Why:** the 2026-11-15 timing breakdown showed that 127 of the upload's 136 s went into one Gemini call (rule PRM-002). It made 4 attempts at an overloaded model (two 504s, two 503s), with back-off in between, and still ended as *needs review*. So the wait bought nothing. The fix is to stop waiting on a busy model: try a different one, and cap the total time.
 

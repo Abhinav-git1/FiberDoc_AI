@@ -95,6 +95,8 @@ Conventions: string IDs (12 hex characters, as today); every table has `created_
 | project_id | FK → projects | indexed |
 | name | varchar | original filename |
 | doc_type | varchar | set by the classifier |
+| doc_type_confidence | float | ✅ 0004. 0–1, how sure the classifier was; kept apart from risk |
+| doc_type_reason | text | ✅ 0004. Why, in words (which path: keywords, embedding tie-break, Gemini) |
 | status | varchar | `uploaded` · `processing` · `awaiting_review` · `reviewed` · `error` |
 | page_count | int | |
 | error | text | |
@@ -110,6 +112,7 @@ Conventions: string IDs (12 hex characters, as today); every table has `created_
 | id | varchar PK | |
 | document_id | FK → documents | indexed |
 | page | int | |
+| seq | int | ✅ 0004. Reading order in the parsed document; finds the title zone (first lines of page 1) |
 | section | varchar | 🆕 heading the chunk sits under (e.g. "3. Underground construction") |
 | kind | varchar | `text` · `table` |
 | text | text | |

@@ -18,7 +18,7 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 
 | # | Item | Status | Why |
 |---|---|---|---|
-| 1 | **Classifier fix** | ⬜ | Keyword hits count the same everywhere, so the sample construction plan is classified as a design summary (its section headings say "Design summary") and the construction rules are skipped. Weight title/first-page hits, use the embedding as a tie-breaker, and keep a confidence value |
+| 1 | **Classifier fix** | ✅ | Done 2026-11-19: title hits weighted 5×, embedding tie-breaker for close calls, confidence and reason stored and shown. The sample construction plan is now classified correctly. Not yet re-uploaded through the UI |
 | 2 | **Recall@3 / Recall@5** on 10–20 labelled documents | ⬜ | Blueprint section 12. Measures whether the right rules are retrieved. Needs `rule_chunks` (schema table 6) and the full retrieved list, which the audit log already stores |
 | 3 | **Risk score and confidence** | ⬜ | Blueprint section 7: severity × status weights, scaled to 0–100, with confidence kept separate and its reasons written out. Adds `workflow_runs` |
 | 4 | **7-node workflow** with pause and resume for review | ⬜ | Blueprint section 3. LangGraph checkpointer, `workflow_steps` (latency, tokens, model per step), versioned `reports` |

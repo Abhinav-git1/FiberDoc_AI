@@ -66,6 +66,9 @@ export interface BackendDoc {
   projectId: string
   name: string
   docType: string
+  /** How sure the classifier was, 0-1, and why. Null for documents classified before 19 Nov 2026. */
+  docTypeConfidence?: number | null
+  docTypeReason?: string | null
   status: 'uploaded' | 'processing' | 'awaiting_review' | 'error'
   pageCount: number
   error: string | null
