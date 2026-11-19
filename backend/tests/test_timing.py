@@ -37,14 +37,14 @@ def test_retry_records_attempts_errors_and_tokens(monkeypatch):
     calls = iter([errors.ServerError(503, {"error": {"message": "overloaded"}}),
                   NS(usage_metadata=NS(prompt_token_count=900, candidates_token_count=30, thoughts_token_count=700))])
 
-    def call():
+    def call(model, timeout_s):
         r = next(calls)
         if isinstance(r, Exception):
             raise r
         return r
 
     with timing.track() as t:
-        llm.GeminiProvider._retry("generate EvidenceCheck", call)
+        llm.GeminiProvider._retry("generate EvidenceCheck", call, ["m"], 60, 30)
     (c,) = t.llm_calls
     assert c["op"] == "generate EvidenceCheck" and c["attempts"] == 2 and len(c["errors"]) == 1
     assert (c["input_tokens"], c["output_tokens"], c["thinking_tokens"]) == (900, 30, 700)
@@ -53,11 +53,11 @@ def test_retry_records_attempts_errors_and_tokens(monkeypatch):
 def test_retry_records_a_call_that_finally_fails(monkeypatch):
     _no_sleep(monkeypatch)
 
-    def call():
+    def call(model, timeout_s):
         raise errors.ClientError(400, {"error": {"message": "bad request"}})  # not transient: no retry
 
     with timing.track() as t, pytest.raises(errors.ClientError):
-        llm.GeminiProvider._retry("embed 3 texts", call)
+        llm.GeminiProvider._retry("embed 3 texts", call, ["m"], 60, 30)
     (c,) = t.llm_calls
     assert c["failed"] and c["attempts"] == 1
 

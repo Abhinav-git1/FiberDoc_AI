@@ -87,6 +87,7 @@ class LlmCallOut(CamelModel):
     attempts: int
     errors: list[str] = []
     failed: bool = False
+    model: str | None = None  # the model that answered (or was tried last); None for calls recorded before 2026-11-19
     input_tokens: int | None = None
     output_tokens: int | None = None
     thinking_tokens: int | None = None

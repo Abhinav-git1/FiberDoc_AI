@@ -176,7 +176,11 @@ const STEP_LABEL: Record<string, string> = {
 /** "ServerError: 503 UNAVAILABLE. {...}" -> "503 unavailable"; anything else -> its error type. */
 const errorLabel = (e: string) => {
   const m = e.match(/:\s*(\d{3})\s+([A-Z_]+)/)
-  return m ? `${m[1]} ${m[2].replace(/_/g, ' ').toLowerCase()}` : e.split(':')[0]
+  // Since 19 Nov 2026 each error starts with its model ("gemini-3.8-flash: ServerError: 503 ..."); older ones don't.
+  const model = e.match(/^(gemini[\w.-]*):/)?.[1]
+  const rest = model ? e.slice(model.length + 1) : e
+  const label = m ? `${m[1]} ${m[2].replace(/_/g, ' ').toLowerCase()}` : rest.split(':')[0].trim()
+  return model ? `${label} (${model})` : label
 }
 const fmtS = (s: number) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(1)} s`)
 
@@ -216,7 +220,8 @@ function TimingSection({ documentId }: { documentId: string }) {
                     <span>{c.op}</span>
                     <span className="time-s">{fmtS(c.seconds)}</span>
                     <div className="muted">
-                      {[c.attempts > 1 ? `${c.attempts} attempts` : null,
+                      {[c.model && c.attempts > 1 && !c.failed ? `answered by ${c.model}` : null,
+                        c.attempts > 1 ? `${c.attempts} attempts` : null,
                         c.thinkingTokens ? `${c.thinkingTokens.toLocaleString()} thinking tokens` : null,
                         c.outputTokens != null ? `${c.outputTokens.toLocaleString()} output tokens` : null,
                         c.failed ? 'failed' : null].filter(Boolean).join(' · ')}

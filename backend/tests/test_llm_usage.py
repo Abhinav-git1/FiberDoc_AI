@@ -23,7 +23,7 @@ def test_usage_and_model_are_recorded(monkeypatch):
     monkeypatch.setattr(llm, "get_current_run_tree", lambda: run)
     usage = NS(prompt_token_count=1200, candidates_token_count=80, thoughts_token_count=40,
                total_token_count=1320, cached_content_token_count=None)
-    _provider()._record_usage(NS(usage_metadata=usage))
+    _provider()._record_usage(NS(usage_metadata=usage), "gemini-test")
     (kw,) = run.calls
     assert kw["metadata"] == {"ls_provider": "google_genai", "ls_model_name": "gemini-test"}
     u = kw["usage_metadata"]
@@ -34,10 +34,10 @@ def test_usage_and_model_are_recorded(monkeypatch):
 def test_no_usage_still_records_model(monkeypatch):
     run = FakeRun()
     monkeypatch.setattr(llm, "get_current_run_tree", lambda: run)
-    _provider()._record_usage(NS(usage_metadata=None))
+    _provider()._record_usage(NS(usage_metadata=None), "gemini-test")
     assert run.calls == [{"metadata": {"ls_provider": "google_genai", "ls_model_name": "gemini-test"}}]
 
 
 def test_noop_when_tracing_is_off(monkeypatch):
     monkeypatch.setattr(llm, "get_current_run_tree", lambda: None)
-    _provider()._record_usage(NS(usage_metadata=None))  # must not raise
+    _provider()._record_usage(NS(usage_metadata=None), "gemini-test")  # must not raise

@@ -12,7 +12,13 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
-    gemini_timeout_s: int = 60  # per HTTP request; without it a stalled call leaves a document 'processing' forever
+    # Second model tried when the main one is overloaded (503) or too slow (504 / timeout). Empty = no fallback.
+    # A different model generation runs on separate capacity, so it is usually free when the main one is busy.
+    gemini_fallback_model: str = "gemini-3.7-flash"
+    gemini_timeout_s: int = 30  # per HTTP request; without it a stalled call leaves a document 'processing' forever
+    # Total time for one Gemini call, retries and model switches included. Past it the rule becomes 'needs review'
+    # (a person checks it) instead of the upload waiting minutes on an overloaded model.
+    gemini_call_budget_s: int = 60
     cors_origins: str = "http://localhost:5173"
     max_upload_mb: int = 25
     upload_dir: str = "data/uploads"  # originals are kept here, under <project_id>/

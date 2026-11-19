@@ -28,7 +28,7 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 
 ## Smaller items
 
-- 🟡 **Processing speed.** The first real upload (4 pages) took 2 min 25 s, almost all of it in Gemini. Timings are now recorded per step and per Gemini call (result panel: "Where the time went"). Next: re-upload, read the breakdown, fix the slowest part (likely model thinking, timeouts or retries).
+- 🟡 **Processing speed.** The first real upload (4 pages) took 2 min 25 s, almost all of it in Gemini. Timings are now recorded per step and per Gemini call (result panel: "Where the time went"). The cause was waiting on an overloaded model (4 failed attempts, 127 s). **Fixed 2026-11-19:** a fallback model on 503/504 and a 60 s total budget per Gemini call, with retries using the whole budget. Re-upload: 17 s instead of 136 s. Next: speed up PDF reading (7–9 s, now the biggest step).
 - ✅ A real upload through the UI, to check chat saving and the category view end to end (done 2026-11-15: a 4-page construction plan, 14 rules checked).
 - ✅ Stop tracking `frontend/tsconfig.tsbuildinfo`, a build cache that changes on every type-check (2026-11-15, now in `.gitignore`).
 - ⬜ Check the LangSmith endpoint deprecation notice, which says the old endpoint stops on 2027-01-31.

@@ -156,6 +156,8 @@ export interface LlmCall {
   attempts: number
   errors: string[]
   failed: boolean
+  /** The model that answered (or was tried last). Null for calls recorded before 19 Nov 2026. */
+  model: string | null
   inputTokens: number | null
   outputTokens: number | null
   thinkingTokens: number | null

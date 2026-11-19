@@ -4,6 +4,43 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-19
+
+### Speed fix: time budget and fallback model for Gemini ✅
+**Why:** the 2026-11-15 timing breakdown showed that 127 of the upload's 136 s went into one Gemini call (rule PRM-002). It made 4 attempts at an overloaded model (two 504s, two 503s), with back-off in between, and still ended as *needs review*. So the wait bought nothing. The fix is to stop waiting on a busy model: try a different one, and cap the total time.
+
+- **Fallback model** (`GEMINI_FALLBACK_MODEL`, default `gemini-3.7-flash`). On a 503 (overloaded), a 504 (deadline) or a client-side timeout, the next attempt goes **straight to the other model, with no sleep**. Back-off only starts once both have failed. *Why 3.7:* it is available to this key, and a different model generation runs on separate capacity, so it is often free when 3.8 is busy.
+- **Total time budget per call** (`GEMINI_CALL_BUDGET_S`, default 60 s). Each request's timeout is cut to whatever is left of the budget. If less than 5 s remains, the call gives up and the rule becomes *needs review*, as before, so a person checks it.
+- **Per-request timeout** lowered from 60 s to 30 s (`GEMINI_TIMEOUT_S`), so a stalled request leaves time for the fallback.
+- **Unchanged:** a 429 (rate limit) still backs off on the same model, and a 400 still fails at once. **Embeddings never fall back**, because vectors from a different model wouldn't match the stored ones. They do get the budget.
+- **Recorded:** each Gemini call in the timing breakdown now stores the model that answered. Each error is prefixed with its model. The result panel shows "answered by gemini-3.7-flash" when the fallback was used, and labels errors like "503 unavailable (gemini-3.8-flash)". LangSmith gets the model that actually answered.
+- **Checked:** the SDK (google-genai 3.0.0) makes only one attempt when no retry options are set, so there are no hidden retries inside our loop.
+- **Tests:** `backend/tests/test_llm_fallback.py` (7 tests, on a fake clock), covering:
+  - fallback on 503 and on a timeout
+  - never running past the budget
+  - request timeouts cut to what's left
+  - single-model back-off for embeddings
+  - no retry for a 400
+  - the fallback list ignores an empty or duplicate fallback
+
+  The existing timing and LangSmith tests were updated for the new signatures.
+
+**Status:** 130 tests passing, 4 skipped. TypeScript compiles; the changed files have no lint warnings. Live check, made while both flash models were returning 503: the call alternated 3.8 → 3.7 → 3.8 → 3.7 and gave up after **25.7 s instead of 127 s**. A live embedding call succeeded (0.4 s).
+
+**Re-upload after restarting the backend** (it ran without `--reload`, so the first re-upload still used the old code): **17.3 s in total**, down from 136.5 s. The rule check alternated 3.8 → 3.7 → 3.8 → 3.7, all 503, and gave up in 7.7 s. A probe right after showed 3.8, 3.7 and 3.5 flash all overloaded. 2.5-flash returns 404 (retired, though the model list still shows it), so more fallback models wouldn't have helped.
+
+### Retries use the whole budget ✅
+**Why:** the 4-attempt cap ended that run after 7.7 s, with about 52 s of the 60 s budget unused, and the rule went to a person. Gemini's "high demand" spells often pass within 20–30 s. The owner chose a real answer over a faster upload, so a busy upload can now take up to about a minute, still never the old 2+ minutes.
+
+- Back-off grows 1, 2, 4, 8, 16 s (capped at 16 s), and the **budget** decides when to stop. `attempts` is now just a safety cap of 10.
+- **Tests:** 2 more in `test_llm_fallback.py`:
+  - quick 503s keep being retried until the budget is used (8 attempts, about 47 s)
+  - an overload that clears after about 25 s gets a real answer
+
+**Status:** 132 tests passing, 4 skipped. The backend now runs with `--reload`.
+
+**Next:** re-upload on a quieter day to see a rule answered by Gemini. Then speed up PDF reading (7–9 s). Then the classifier fix.
+
 ## 2026-11-17
 
 ### Bigger diagrams on GitHub ✅
