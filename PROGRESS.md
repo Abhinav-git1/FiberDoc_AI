@@ -24,7 +24,21 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 - **Real upload.** `samples/demo_small_construction_plan.pdf` was uploaded through the UI. When checking finished, FiberDoc sent `document.checked` by itself (delivery log: Sent · 200) and the email arrived.
 - **Token rotated.** A screenshot of the n8n execution showed the shared token in plain text (n8n saves request headers with each execution), so it was replaced with **New token** and updated in n8n. *Why:* a secret seen outside its two systems counts as leaked. Possible later improvement: check the HMAC `X-FiberDoc-Signature` in n8n instead of sending the token itself.
 
-**Next:** the Think → Act agent workflow, then MCP, then items A → B → C.
+### n8n: Think → Act agent workflow made resilient 🟡
+**Why:** the first live runs showed that an optional AI step could block the main job. When Gemini failed, the run stayed "Running" for minutes and then failed, so **no email was sent at all**. The findings email is the core job; the AI next steps are extra.
+
+- **Imported and connected** `fiberdoc_think_act_workflow.json`. Its Gemini key is in a **separate Google project** (`fiberdoc-n8n`). *Why:* free-tier quota belongs to the project, so a second key in FiberDoc's project would have shared FiberDoc's quota. It can also be revoked on its own.
+- **What went wrong, in order** (read from n8n's execution data):
+  1. `429 PerMinute` (5 requests/min): two tests were sent a minute apart, and the Gemini node's own retries added more requests.
+  2. `503 overloaded` on `gemini-3.8-flash`.
+  3. `429 PerDay` (20 requests/day): the earlier stuck runs' retries had used up the new project's daily quota.
+- **Fix** (now also in the repo file): both Gemini nodes use `gemini-3.7-flash`, the backend's fallback model. **Think** and **Act** retry once, then **continue on error**. **Build email** already handles missing AI output, so the email always goes out.
+- **Verified:** run #7 hit the daily quota, continued, and sent the findings email without AI steps.
+- **Not yet verified:** a run where Think and Act both succeed (blocked by the daily quota until it resets).
+- **Unexplained:** the 429 messages name `gemini-3.8-flash` although every saved version uses `gemini-3.7-flash`. Google may count both against one quota; not confirmed.
+- **Docs:** `integrations/n8n/README.md` updated for n8n 2.x (Publish instead of Active), the separate-project key, the quota types and the token-in-logs risk.
+
+**Next:** one Think → Act test after the quota resets, then MCP, then items A → B → C.
 
 ---
 

@@ -82,6 +82,6 @@ Suggested order: A → B → C (C needs Redis, which B can run), then D with the
 **Status:**
 - ✅ **Outbound webhook** (2026-11-16): the settings and the delivery log are on the ⚡ Automations page; the payload is signed and delivery is retried. The n8n email workflow is in `integrations/n8n/`, with its setup guide.
 - ✅ First real run (2026-11-20): n8n 2.48.7 via `npx n8n`, workflow imported and published, Gmail App Password (SMTP 465/SSL), Header Auth token. The **[TEST]** email arrived, and so did the email for a real upload (`demo_small_construction_plan.pdf`). Next: the Think → Act workflow.
-- 🟡 **Think → Act agent** (`integrations/n8n/fiberdoc_think_act_workflow.json`): two Gemini agents write suggested next steps for the email. Built and checked offline; not yet imported or run in n8n.
+- 🟡 **Think → Act agent** (`integrations/n8n/fiberdoc_think_act_workflow.json`): two Gemini agents write suggested next steps for the email. Imported and published 2026-11-20, with its own Gemini project, a fallback model, retry and continue-on-error. Graceful degradation verified (the email still arrives when Gemini fails). **Left:** one run where both agents succeed, after the free-tier daily quota resets. Send **one** test, not several.
 - ⬜ **Intake** (n8n → `POST /api/projects/{id}/documents`) needs **API-key auth** on FiberDoc first (roadmap item 5). Until then, n8n could upload to an open local API, so it isn't built.
 - ⬜ Reminders and Jira/Slack: extra nodes in n8n, using the same webhook.

@@ -62,8 +62,8 @@ In n8n: **Create workflow** → the **⋯** menu (top right) → **Import from F
    - **SSL/TLS:** on
 3. In the same node, change **From Email** from `you@gmail.com` to your Gmail address.
 
-### 5. Activate the workflow and copy its URL
-1. **Save** the workflow, then switch it to **Active** (top right).
+### 5. Publish the workflow and copy its URL
+1. **Save** the workflow, then click **Publish** (top right) and give the version a name. In n8n 2.x, publishing replaces the old **Active** switch, and each publish is kept as a version you can go back to.
 2. Open the **FiberDoc webhook** node and copy the **Production URL**, for example
    `http://localhost:5678/webhook/fiberdoc-checked`.
 
@@ -105,8 +105,9 @@ The next steps are **suggestions only**: the email says so, and findings are sti
 **Setup.** Follow steps 1–6 above, importing this file instead (or as well). Then add one more credential:
 - **Gemini (Think)** and **Gemini (Act)** nodes → **Credential** → **Create new** (*Google Gemini (PaLM) API*).
   - **Host:** leave the default.
-  - **API Key:** a Gemini API key. You can reuse `GEMINI_API_KEY` from `backend/.env`, or create a separate one in Google AI Studio, so n8n's usage is counted separately.
-- The model is `models/gemini-3.8-flash`, the same as the backend. Change it in both Gemini nodes if you like.
+  - **API Key:** use a separate key in its **own Google project** (AI Studio → Create API key → Create project, for example `fiberdoc-n8n`). Free-tier limits belong to the project, not the key, so a second key in FiberDoc's project would share FiberDoc's quota. A separate project also means you can revoke n8n's key without breaking FiberDoc.
+- The model is `models/gemini-3.7-flash`, the backend's fallback model, because `gemini-3.8-flash` was often overloaded (503). Change it in both Gemini nodes if you like.
+- **Think** and **Act** retry once (Settings → Retry On Fail, 2 tries) and then **continue on error**. If Gemini is down or out of quota, the email still goes out, without the AI steps. n8n caps the wait between tries at 1000 ms.
 
 Its webhook path is `fiberdoc-think-act`, so its Production URL ends in `/webhook/fiberdoc-think-act`. Paste that URL into the
 Automations page to use this workflow. Only one URL is active at a time.
@@ -119,10 +120,11 @@ and then through your mail server. The Automations page shows this as step 5.
 | What you see | Likely cause |
 |---|---|
 | Log: `Failed`, `ConnectError` | n8n isn't running, or the URL's host or port is wrong |
-| Log: `HTTP 404` | The workflow isn't **Active**, or you used the Test URL (`/webhook-test/`) |
+| Log: `HTTP 404` | The workflow isn't **published**, or you used the Test URL (`/webhook-test/`) |
 | Log: `HTTP 403` / `401` | The token in n8n's Header Auth doesn't match FiberDoc's (for example after **New token**) |
 | Log: `Sent`, but no email | Check **Executions** in n8n: usually the SMTP login (App Password, port 465 with SSL) or the From address. Also check the spam folder |
-| Think/Act node fails in Executions | `503`/`429` from Gemini means it's overloaded or the daily quota is used up. Re-run the execution later. A parser error means the model broke the JSON format: run it again, or lower the temperature in the Gemini node |
+| Email arrives without AI next steps, or a run stays "Running" for minutes | Gemini failed and the workflow continued without it. Open the run in **Executions** and look at Think's error. `503` = the model is overloaded (try later). `429` with `PerMinute` = more than 5 requests a minute (don't send several tests at once). `429` with `PerDay` = the free tier's 20 requests a day are used up (resets at midnight Pacific time). The Gemini node also retries by itself, and **every retry counts against the quota**. A parser error means the model broke the JSON format: run it again |
+| Execution data shows the shared token | n8n saves request headers with each execution. Don't share screenshots of them. If the token was exposed, click **New token** in FiberDoc and paste it into n8n's Header Auth credential |
 | Imported node shows "?" or "install" | Your n8n version names that node differently. Re-add it from the node panel with the same settings (the AI nodes are under *Advanced AI*) |
 
 ## Payload reference
