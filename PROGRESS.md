@@ -4,6 +4,30 @@ Newest entries first. Each entry lists what changed, why, and what is next.
 
 ---
 
+## 2026-11-20
+
+### To-do: engineering skills section added
+**Why:** the owner checked their projects against a common job-requirements list. REST APIs and auth are covered (the auth is in the portfolio project). CI, a full Docker setup and a task queue are not in any project yet. Building them in FiberDoc gives real code to point to.
+
+- **`TODO.md`:** a new "Engineering skills" table: (A) GitHub Actions CI, (B) Docker Compose for the whole app, (C) a Celery + Redis task queue for upload processing, (D) user auth with roles (same as roadmap item 5). Each has a rough time estimate.
+
+**Status:** planning only, no code changed.
+
+### n8n: first real email ✅
+**Why:** the email automation (built 2026-11-16) had only been tested offline. Running it for real proves the whole chain: FiberDoc → signed webhook → n8n → Gmail → inbox.
+
+- **Setup.** n8n 2.48.7 runs locally (`npx n8n`, http://localhost:5678; data in `C:\Users\abhin\.n8n\`). `integrations/n8n/fiberdoc_email_workflow.json` was imported by pasting it onto the canvas, then **published**. In n8n 2.x, publishing replaces the old "Active" switch and saves a named version.
+- **Credentials.** SMTP: `smtp.gmail.com`, port 465, SSL, with a Gmail **App Password**. Header Auth: `X-FiberDoc-Token` with the shared token from the ⚡ Automations page.
+- **Result.** "Send test" on the Automations page delivered "[TEST] FiberDoc: example_construction_plan.pdf checked, 1 failed, 2 open", with the findings table.
+- **Environment.** The PostgreSQL service had stopped (it was set to manual start). It now starts automatically.
+
+- **Real upload.** `samples/demo_small_construction_plan.pdf` was uploaded through the UI. When checking finished, FiberDoc sent `document.checked` by itself (delivery log: Sent · 200) and the email arrived.
+- **Token rotated.** A screenshot of the n8n execution showed the shared token in plain text (n8n saves request headers with each execution), so it was replaced with **New token** and updated in n8n. *Why:* a secret seen outside its two systems counts as leaked. Possible later improvement: check the HMAC `X-FiberDoc-Signature` in n8n instead of sending the token itself.
+
+**Next:** the Think → Act agent workflow, then MCP, then items A → B → C.
+
+---
+
 ## 2026-11-19
 
 ### Roadmap step 1: classifier fix ✅

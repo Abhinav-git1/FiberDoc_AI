@@ -12,7 +12,7 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 | 1 | Show the result of an uploaded document in the UI, broken into categories, with a button to open it from the chat | ✅ | Result panel (`frontend/src/ResultPanel.tsx`), opened by **View details →**. Shows counts by status, severity and **rule category** (Construction, Permits, Design…). Click a category to filter the findings |
 | 2 | Schema for the data: where to store it, how many tables | ✅ | [docs/schema.md](docs/schema.md): one Postgres + pgvector database, 14 tables (8 existing, 6 new) plus `geo_features` later. Alembic migrations in `backend/migrations/`; chat tables built (`0002`). The other new tables come with the roadmap steps that use them |
 | 3 | MCP server: connect external tools to the app | ⬜ | See [MCP](#mcp-model-context-protocol) below |
-| 4 | n8n: automate the workflow around the app | 🟡 | **Email after each upload is built:** outbound webhook, ⚡ Automations page, and an importable n8n workflow ([integrations/n8n/](integrations/n8n/README.md)). Not yet run against a real n8n and inbox. Intake and reminders are still to do. See [n8n](#n8n-workflow-automation) below |
+| 4 | n8n: automate the workflow around the app | 🟡 | **Email after each upload is built:** outbound webhook, ⚡ Automations page, and an importable n8n workflow ([integrations/n8n/](integrations/n8n/README.md)). **First real run done 2026-11-20:** test email received through local n8n and Gmail SMTP. Intake and reminders are still to do. See [n8n](#n8n-workflow-automation) below |
 
 ## Roadmap (blueprint)
 
@@ -28,12 +28,25 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 
 ## Smaller items
 
-- 🟡 **Processing speed.** The first real upload (4 pages) took 2 min 25 s, almost all of it in Gemini. Timings are now recorded per step and per Gemini call (result panel: "Where the time went"). The cause was waiting on an overloaded model (4 failed attempts, 127 s). **Fixed 2026-11-19:** a fallback model on 503/504 and a 60 s total budget per Gemini call, with retries using the whole budget. Re-upload: 17 s instead of 136 s. Next: speed up PDF reading (7–9 s, now the biggest step).
+- 🟡 **Processing speed.** The first real upload (4 pages) took 2 min 25 s, almost all of it in Gemini. Timings are now recorded per step and per Gemini call (result panel: "Where the time went"). The cause was waiting on an overloaded model (4 failed attempts, 127 s). **Fixed 2026-11-19:** a fallback model on 503/504 and a 60 s total budget per Gemini call, with retries using the whole budget. Re-upload: 17 s instead of 136 s. Next: speed up PDF reading (7–9 s, now the biggest step). **Measured 2026-11-19:** text extraction takes 0.004 s; PyMuPDF `find_tables()` takes the rest (about 0.2–1.4 s per page, plus a one-off warm-up). In the owner's 4-page test PDF, 3 pages have no vector lines at all (`page.get_drawings()` is empty) and no tables. Planned fix: skip `find_tables()` on pages without line or rect drawings. Paused for the n8n/MCP work.
 - ✅ A real upload through the UI, to check chat saving and the category view end to end (done 2026-11-15: a 4-page construction plan, 14 rules checked).
 - ✅ Stop tracking `frontend/tsconfig.tsbuildinfo`, a build cache that changes on every type-check (2026-11-15, now in `.gitignore`).
 - ⬜ Check the LangSmith endpoint deprecation notice, which says the old endpoint stops on 2027-01-31.
 - ⬜ Serve stored originals back and delete them with their project.
 - ⬜ Chat Q&A. The chat says it isn't built. It would be retrieval over the document's chunks, with citations.
+
+## Engineering skills (added 2026-11-20)
+
+The owner's projects were checked against a common job-requirements list (REST APIs, Docker/Kubernetes, CI/CD, task queues, load balancers, observability, auth). REST APIs and auth (in the portfolio) are covered. These four close the biggest gaps with real code in FiberDoc. Times are rough estimates of hands-on work together, not calendar time.
+
+| # | Item | Status | Est. time | Why |
+|---|---|---|---|---|
+| A | **CI: GitHub Actions** | ⬜ | ~1 hour | Run pytest (with a Postgres + pgvector service container) and the frontend type-check on every push and pull request. Today the 130 tests only run by hand, and none of the projects has CI |
+| B | **Docker Compose for the whole app** | ⬜ | 1–2 hours | Backend, frontend and Postgres start with one command. `backend/Dockerfile` exists but has never been used. A first step toward roadmap item 7 (deployment) |
+| C | **Task queue: Celery + Redis** | ⬜ | ~half a day | Upload processing currently runs in FastAPI `BackgroundTasks`, inside the web server process. A server restart loses in-progress uploads (it has happened). A queue keeps jobs across restarts, retries them, and lets workers scale separately from the API |
+| D | **User auth with roles** | ⬜ | ~1 day | Same as roadmap item 5: demo login with engineer / reviewer / admin roles, replacing the hard-coded "Reviewer". Also unblocks n8n intake, which needs API-key auth |
+
+Suggested order: A → B → C (C needs Redis, which B can run), then D with the roadmap.
 
 ---
 
@@ -68,7 +81,7 @@ Status: ✅ done · 🟡 partly done · ⬜ not started
 
 **Status:**
 - ✅ **Outbound webhook** (2026-11-16): the settings and the delivery log are on the ⚡ Automations page; the payload is signed and delivery is retried. The n8n email workflow is in `integrations/n8n/`, with its setup guide.
-- ⬜ First real run: n8n started, Gmail App Password created, test email received.
+- ✅ First real run (2026-11-20): n8n 2.48.7 via `npx n8n`, workflow imported and published, Gmail App Password (SMTP 465/SSL), Header Auth token. The **[TEST]** email arrived, and so did the email for a real upload (`demo_small_construction_plan.pdf`). Next: the Think → Act workflow.
 - 🟡 **Think → Act agent** (`integrations/n8n/fiberdoc_think_act_workflow.json`): two Gemini agents write suggested next steps for the email. Built and checked offline; not yet imported or run in n8n.
 - ⬜ **Intake** (n8n → `POST /api/projects/{id}/documents`) needs **API-key auth** on FiberDoc first (roadmap item 5). Until then, n8n could upload to an open local API, so it isn't built.
 - ⬜ Reminders and Jira/Slack: extra nodes in n8n, using the same webhook.
