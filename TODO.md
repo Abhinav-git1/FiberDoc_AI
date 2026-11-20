@@ -41,7 +41,7 @@ The owner's projects were checked against a common job-requirements list (REST A
 
 | # | Item | Status | Est. time | Why |
 |---|---|---|---|---|
-| A | **CI: GitHub Actions** | ⬜ | ~1 hour | Run pytest (with a Postgres + pgvector service container) and the frontend type-check on every push and pull request. Today the 130 tests only run by hand, and none of the projects has CI |
+| A | **CI: GitHub Actions** | ⬜ | ~1 hour | Run pytest (with a Postgres + pgvector service container) and the frontend type-check on every push and pull request. Today the 145 tests only run by hand, and none of the projects has CI |
 | B | **Docker Compose for the whole app** | ⬜ | 1–2 hours | Backend, frontend and Postgres start with one command. `backend/Dockerfile` exists but has never been used. A first step toward roadmap item 7 (deployment) |
 | C | **Task queue: Celery + Redis** | ⬜ | ~half a day | Upload processing currently runs in FastAPI `BackgroundTasks`, inside the web server process. A server restart loses in-progress uploads (it has happened). A queue keeps jobs across restarts, retries them, and lets workers scale separately from the API |
 | D | **User auth with roles** | ⬜ | ~1 day | Same as roadmap item 5: demo login with engineer / reviewer / admin roles, replacing the hard-coded "Reviewer". Also unblocks n8n intake, which needs API-key auth |

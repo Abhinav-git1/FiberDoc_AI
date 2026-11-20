@@ -356,7 +356,7 @@ there and restart it by hand.
 
 ```powershell
 cd backend
-pytest                          # 123 passed, 4 skipped (as of 2026-11-16)
+pytest                          # 145 passed, 4 skipped (as of 2026-11-20)
 $env:RUN_LIVE_EVAL=1; pytest tests/test_eval_semantic.py   # live Gemini checks (uses quota)
 python -m evals.run_eval        # end-to-end harness: real parse → embed → LangGraph, scored per case
 cd ../frontend

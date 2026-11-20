@@ -47,7 +47,7 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env               # set DATABASE_URL and GEMINI_API_KEY
 uvicorn app.main:app --port 8000     # http://localhost:8000/docs
-pytest                               # 123 passed, 4 skipped (live Gemini evals need RUN_LIVE_EVAL=1)
+pytest                               # 145 passed, 4 skipped (live Gemini evals need RUN_LIVE_EVAL=1)
 ```
 
 At startup the server applies migrations, seeds or syncs the rules (it embeds them when the Gemini key is set), and
